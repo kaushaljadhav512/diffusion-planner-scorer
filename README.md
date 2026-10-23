@@ -1,178 +1,142 @@
-<div align="center">
-<img src="./assets/img/diffusion_planner.png" width=100% style="vertical-align: bottom;">
-<h3>Diffusion-Based Planning for Autonomous Driving with Flexible Guidance</h3>
+# Learning to Pick the Plan: A Learned Trajectory Scorer for Diffusion Planner
 
-[Yinan Zheng](https://github.com/ZhengYinan-AIR)\*, [Ruiming Liang](https://github.com/LRMbbj)\*, Kexin Zheng\*, [Jinliang Zheng](https://github.com/2toinf), Liyuan Mao, [Jianxiong Li](https://facebear-ljx.github.io/), Weihao Gu, Rui Ai, [Shengbo Eben Li](https://scholar.google.com/citations?user=Dxiw1K8AAAAJ&hl=zh-CN), [Xianyuan Zhan](https://zhanzxy5.github.io/zhanxianyuan/), [Jingjing Liu](https://air.tsinghua.edu.cn/en/info/1046/1194.htm)
+CMU 11-785 course project. The project proposal is in [`docs/IDL_Project_proposal.pdf`](docs/IDL_Project_proposal.pdf).
 
+This repository is built on [Diffusion-Planner](https://github.com/ZhengYinan-AIR/Diffusion-Planner) (Zheng et al., ICLR 2025), starting from upstream commit `a3a621f`. The upstream README is kept as [`UPSTREAM_README.md`](UPSTREAM_README.md). All credit for the base planner belongs to its authors; this repository is private and for coursework only.
 
-[**[Arxiv]**](https://arxiv.org/pdf/2501.15564) [**[Project Page]**](https://zhengyinan-air.github.io/Diffusion-Planner/)
-
-International Conference on Learning Representation (ICLR), 2025
-
-🌟 **Oral Presentation (Notable-top-2%)**
-</div>
-
-The official implementation of **Diffusion Planner**, which **represents a pioneering effort in fully harnessing the power of diffusion models for high-performance motion planning, without overly relying on refinement**. Checkout our latest work [**Flow Planner (NeurIPS 2025)**](https://github.com/DiffusionAD/Flow-Planner), a learning-based framework with advanced interactive behavior modeling. Also checkout [**Hyper Diffusion Planner**](https://github.com/ZhengYinan-AIR/Hyper-Diffusion-Planner), where we unleash the potential of diffusion models for real vehicle deployment. When properly designed and trained, diffusion models can serve as effective and scalable solutions for complex real-world autonomous driving tasks.
-
-<div style="display: flex; justify-content: center; align-items: center; gap: 2%;">
-
-  <img src="./assets/gif/near_ped.gif" width="32%" alt="Video 1">
-
-  <img src="./assets/gif/unprotect_turn.gif" width="32%" alt="Video 2">
-
-  <img src="./assets/gif/multiple_vehicle.gif" width="32%" alt="Video 3">
-
-</div>
-
-## Table of Contents
-
-- [Methods](#methods)
-- [Closed-loop Performance on nuPlan](#closed-loop-performance-on-nuplan)
-   - [Learning-based Methods](#learning-based-methods)
-   - [Rule-based / Hybrid Methods](#rule-based-hybrid-methods)
-   - [Qualitative Results](#qualitative-results)
-- [Getting Started](#getting-started)
-  - [Closed-loop Evaluation](#closed-loop-evaluation)
-  - [Training](#training)
-
-
-## Methods
-
-**Diffusion Planner** leverages the expressive and flexible diffusion model to enhance autonomous planning:
-* DiT-based architecture focusing on the fusion of noised future vehicle trajectories and conditional information
-* Joint modeling of key participants' statuses, unifying motion prediction and closed-loop planning as future trajectory generation
-* Fast inference during diffusion sampling, achieving around 20Hz for real-time performance
-
-<image src="assets/img/architecture.png" width=100%>
-
-## Closed-loop Performance on nuPlan
-### Learning-based Methods
-
-
-| Methods                            | Val14 (NR) | Val14 \(R\) | Test14-hard (NR) | Test14-hard \(R\) | Test14 (NR) | Test14 \(R\) |
-| ---------------------------------- | ---------- | ----------- | ---------------- | ----------------- | ----------- | ------------ |
-| PDM-Open*                          | 53.53      | 54.24       | 33.51            | 35.83             | 52.81       | 57.23        |
-| UrbanDriver                        | 68.57      | 64.11       | 50.40            | 49.95             | 51.83       | 67.15        |
-| GameFormer w/o refine.             | 13.32      | 8.69        | 7.08             | 6.69              | 11.36       | 9.31         |
-| PlanTF                             | 84.72      | 76.95       | 69.70            | 61.61             | 85.62       | 79.58        |
-| PLUTO w/o refine.*                 | 88.89      | 78.11       | 70.03            | 59.74             | **89.90**   | 78.62        |
-| Diffusion-es w/o LLM               | 50.00      | -           | -                | -                 | -           | -            |
-| STR2-CPKS-800M w/o refine.*        | 65.16      | -           | 52.57            | -                 | 68.74       | -            |
-| Diffusion Planner (ours)           | **89.87**  | **82.80**   | **75.99**        | **69.22**         | **89.19**   | **82.93**    |
-
-*: Using pre-searched reference lines or additional proposals as model inputs provides prior knowledge.
+This document describes how to set up the nuPlan workspace on a local machine and reproduce the midterm baseline: the released Diffusion Planner checkpoint, evaluated in closed-loop simulation on the Test14-hard benchmark with non-reactive (NR) and reactive (R) traffic agents.
 
 ---
 
-### Rule-based / Hybrid Methods
+## 0. Requirements
 
-| Methods                              | Val14 (NR) | Val14 \(R\) | Test14-hard (NR) | Test14-hard \(R\) | Test14 (NR) | Test14 \(R\) |
-| ------------------------------------ | ---------- | ----------- | ---------------- | ----------------- | ----------- | ------------ |
-| **Expert (Log-replay)**              | 93.53      | 80.32       | **85.96**        | 68.80             | 94.03       | 75.86        |
-| IDM                                  | 75.60      | 77.33       | 56.15            | 62.26             | 70.39       | 74.42        |
-| PDM-Closed                           | 92.84      | 92.12       | 65.08            | 75.19             | 90.05       | 91.63        |
-| PDM-Hybrid                           | 92.77      | 92.11       | 65.99            | 76.07             | 90.10       | 91.28        |
-| GameFormer                           | 79.94      | 79.78       | 68.70            | 67.05             | 83.88       | 82.05        |
-| PLUTO                                | 92.88      | 76.88       | 80.08            | 76.88             | 92.23       | 90.29        |
-| Diffusion-es                         | 92.00      | -           | -                | -                 | -           | -            |
-| STR2-CPKS-800M                       | 93.91      | 92.51       | 77.54            | **82.02**         | -           | -            |
-| Diffusion Planner w/ refine (ours)   | **94.26**  | **92.90**   | 78.87            | **82.00**         | **94.80**   | **91.75**    |
+| Requirement | Minimum | Verify with |
+|---|---|---|
+| Operating system | Ubuntu 22.04, or Windows 11 with WSL2 (Ubuntu 22.04). macOS is not supported. | `lsb_release -a` |
+| Memory | 16 GB (32 GB roughly halves simulation time) | `free -g` |
+| Free disk space | Size of the maps and test-split archives (listed on the nuPlan download page) plus 30 GB | `df -h ~` |
+| GPU | Optional: NVIDIA GPU with ≥ 4 GB memory. Without one, the planner runs on CPU at reduced speed. | `nvidia-smi` |
 
----
+**WSL2:** store the dataset inside the Linux filesystem (e.g. under `~`), not on a Windows-mounted drive (`/mnt/c`, `/mnt/d`). nuPlan reads its SQLite databases continuously, and access through Windows mounts is an order of magnitude slower. If the system drive lacks space, [relocate the WSL virtual disk](https://learn.microsoft.com/en-us/windows/wsl/disk-space). For GPU support, install the standard Windows NVIDIA driver only; no driver should be installed inside the WSL distribution.
 
-###  Qualitative Results
-
-<image src="assets/img/quality.png" width=100%>
-
-**Future trajectory generation visualization**. A frame from a challenging narrow road turning scenario in the closed-loop test, including the **future planning** of the ego vehicle (*PlanTF* and *PLUTO w/o refine.* showing multiple **candidate trajectories**), **predictions** for neighboring vehicles, and the **ground truth** ego trajectory.
-
-
-## Getting Started
-
-- Setup the nuPlan dataset following the [offiical-doc](https://nuplan-devkit.readthedocs.io/en/latest/dataset_setup.html)
-- Setup conda environment
+**External storage (native Ubuntu):** if internal disk space is insufficient, use an ext4-formatted external SSD and set the data location in every shell before running any command below:
+```bash
+export NUPLAN_HOME=/media/$USER/<drive-name>/nuplan
 ```
-conda create -n diffusion_planner python=3.9
+If `NUPLAN_HOME` is not set, data is stored under `~/nuplan`.
+
+---
+
+## 1. Clone the repository
+
+```bash
+sudo apt-get install -y git tmux
+git clone git@github.com:kaushaljadhav512/diffusion-planner-scorer.git
+cd diffusion-planner-scorer
+```
+Repository access must be granted by the owner, under Settings → Collaborators. If no SSH key is configured with GitHub, clone over HTTPS instead: `https://github.com/kaushaljadhav512/diffusion-planner-scorer.git`.
+
+## 2. Install the environment (approx. 30–45 min)
+
+```bash
+bash setup/bootstrap.sh
+```
+The script performs the following steps:
+- Installs required system packages (prompts for `sudo` once).
+- Installs Miniforge (conda) if conda is not already present.
+- Creates the `diffusion_planner` conda environment (Python 3.9).
+- Installs nuplan-devkit and tuplan_garage at the commits pinned in `setup/config.env`, and this repository (the `diffusion_planner` package) in editable mode.
+- Downloads the Diffusion Planner checkpoint.
+- Writes the resolved package versions to `setup/pip-freeze.txt`.
+
+The script is idempotent and can be re-run after a failure. On completion it reports whether CUDA is available and confirms that the checkpoint loads.
+
+Open a new shell after installation. Every subsequent shell requires:
+```bash
+cd diffusion-planner-scorer
 conda activate diffusion_planner
-
-# install nuplan-devkit
-git clone https://github.com/motional/nuplan-devkit.git && cd nuplan-devkit
-pip install -e .
-pip install -r requirements.txt
-
-# setup diffusion_planner
-cd ..
-git clone https://github.com/ZhengYinan-AIR/Diffusion-Planner.git && cd Diffusion-Planner
-pip install -e .
-pip install -r requirements_torch.txt
+source setup/config.env          # export NUPLAN_HOME first if using external storage
 ```
 
-### Closed-loop Evaluation
-- Download the model checkpoint from [Huggingface](https://huggingface.co/ZhengYinan2001/Diffusion-Planner) repository. Download, two files under `checkpoints` directory. 
-```bash
-mkdir -p checkpoints
-wget -P ./checkpoints https://huggingface.co/ZhengYinan2001/Diffusion-Planner/resolve/main/args.json
-wget -P ./checkpoints https://huggingface.co/ZhengYinan2001/Diffusion-Planner/resolve/main/model.pth
-```
-- Run the simulation
-1. Set up configuration in sim_diffusion_planner_runner.sh.
-2. Run
-```bash 
-bash sim_diffusion_planner_runner.sh
-```
-- Visualize the results
-1. Set up configuration in run_nuboard.ipynb.
-2. Launch Jupyter Notebook or JupyterLab to execute run_nuboard.ipynb.
+## 3. Download the nuPlan data
 
-### Classifer Guidance Demo
+nuPlan is distributed under Motional's dataset license. **Each user must register individually and accept the license.** Download links are personal and must not be shared.
 
-1. Set up configuration in sim_diffusion_planner_runner.sh.
-2. Run
+1. Register at <https://www.nuscenes.org/nuplan#download> and accept the license terms.
+2. From the download page, copy the links for these two archives only:
+   - **Maps:** `nuplan-maps-v1.1` (or the latest maps release)
+   - **Test split:** the nuPlan v1.1 **test** database archive. The train, val and sensor-blob archives are not needed.
+3. Save the links to `urls.txt` in the repository root, one per line. This file is excluded from version control. The links expire, so start the download promptly.
+4. Run:
+   ```bash
+   bash setup/download_nuplan.sh urls.txt
+   ```
+   Interrupted downloads resume when the script is re-run. On completion, the script prints the number of databases per split, and the `test` count must be non-zero. The archives in `$NUPLAN_HOME/downloads` can then be deleted.
+
+## 4. Smoke test (approx. 5–15 min)
 
 ```bash
-bash sim_guidance_demo.sh
+SMOKE=5 bash scripts/run_sim.sh dp test14-hard nr
 ```
+This simulates the first five scenarios and verifies the pipeline end to end.
+- The first output line reports the number of parallel simulations (`threads`), which defaults to available RAM ÷ 3 GB, and the number of GPUs detected.
+- Record the run time. A full run takes approximately (smoke-test time) × 272 / 5.
+- `python scripts/summarize_results.py` should list a `test14-hard_smoke5` row with a closed-loop score (CLS).
 
-Further detail see [Classifier Guidance Doc](diffusion_planner/model/guidance/documentation_guidance.md)
+## 5. Baseline runs
 
-### Training
-- Preprocess the training data
+Each full run covers 272 scenarios and can take several hours on a laptop. Run inside `tmux` so the job continues if the terminal closes:
 ```bash
-chmod +x data_process.sh
-./data_process.sh
+tmux new -s sim
+bash scripts/run_sim.sh dp test14-hard nr      # Run 1: non-reactive agents
+bash scripts/run_sim.sh dp test14-hard r       # Run 2: reactive agents
 ```
-- Run the training code
+Detach with `Ctrl-b d`, and reattach with `tmux attach -t sim`.
+
+Alternatively, run both configurations in sequence, with per-run log files and a summary at the end:
 ```bash
-chmod +x torch_run.sh
-./torch_run.sh
+PLANNERS=dp SPLITS=test14-hard bash scripts/run_baselines.sh
 ```
 
-## To Do List
+## 6. Report results
 
-The code is under cleaning and will be released gradually.
-
-- [x] e2e & real world vehicle ([**Hyper Diffusion Planner**](https://github.com/ZhengYinan-AIR/Hyper-Diffusion-Planner))
-- [ ] delivery vehicle dataset (government approval in progress)
-- [x] guidance tutorial
-- [x] data preprocess
-- [x] training code
-- [x] diffusion planner & checkpoint
-- [x] initial repo & paper
-
-
-## Bibtex
-
-If you find our code and paper can help, please cite our paper as:
+```bash
+python scripts/summarize_results.py --by-type --csv results/dp_test14hard.csv | tee results/dp_test14hard.txt
+git add results/ && git commit -m "Diffusion Planner Test14-hard baseline (NR + R)" && git push
 ```
-@inproceedings{
-zheng2025diffusionbased,
-title={Diffusion-Based Planning for Autonomous Driving with Flexible Guidance},
-author={Yinan Zheng and Ruiming Liang and Kexin ZHENG and Jinliang Zheng and Liyuan Mao and Jianxiong Li and Weihao Gu and Rui Ai and Shengbo Eben Li and Xianyuan Zhan and Jingjing Liu},
-booktitle={The Thirteenth International Conference on Learning Representations},
-year={2025},
-url={https://openreview.net/forum?id=wM2sfVgMDH}
-}
+The summary lists each score alongside the published values (75.99 NR, 69.22 R) and the difference. Also record the hardware used (CPU, RAM, GPU) and the wall-clock time of each run.
+
+---
+
+## Troubleshooting
+
+| Symptom | Resolution |
+|---|---|
+| System becomes unresponsive, process killed, or out-of-memory errors | Reduce parallelism: `THREADS=2 bash scripts/run_sim.sh ...` |
+| `CUDA out of memory` | `GPU_FRAC=0.5 THREADS=2 bash scripts/run_sim.sh ...`, or force CPU execution with `CUDA_VISIBLE_DEVICES= bash scripts/run_sim.sh ...` |
+| Fewer than 272 scenarios, or zero scenarios found | Test databases are missing or misplaced. They must be in `$NUPLAN_DATA_ROOT/nuplan-v1.1/test/*.db`, and `NUPLAN_HOME` must match the location used for the download. |
+| Hydra errors such as `could not find ... scenario_filter` | The environment is inactive or the installation is incomplete. Activate `diffusion_planner` and re-run `bash setup/bootstrap.sh`. |
+| Import errors involving `ray` or `numpy` | Report the full error together with `setup/pip-freeze.txt`. |
+| HTTP 403 on download | The links have expired. Copy new links from the nuPlan download page. |
+
+## Repository layout
+
+```
+diffusion_planner/            Diffusion Planner package (upstream code; project extensions are added here)
+checkpoints/                  released Diffusion Planner checkpoint (downloaded by bootstrap; not version-controlled)
+setup/config.env              paths and pinned upstream commits (override NUPLAN_HOME via export)
+setup/bootstrap.sh            one-time environment installation
+setup/download_nuplan.sh      download and arrange nuPlan archives
+scripts/run_sim.sh            single closed-loop simulation (planner, split, nr|r)
+scripts/run_baselines.sh      grid of simulations followed by a summary
+scripts/summarize_results.py  results table with comparison against published scores
+scripts/plot_baseline.py      per-scenario-type CLS figure for the report
+docs/aws.md                   notes for running on AWS
+results/                      committed result tables
+report/                       midterm/final report sources and figures
+third_party/                  nuplan-devkit and tuplan_garage (created by bootstrap; not version-controlled)
 ```
 
-## Acknowledgement
-Diffusion Planner is greatly inspired by the following outstanding contributions to the open-source community: [nuplan-devkit](https://github.com/motional/nuplan-devkit), [GameFormer-Planner](https://github.com/MCZhi/GameFormer-Planner), [tuplan_garage](https://github.com/autonomousvision/tuplan_garage), [planTF](https://github.com/jchengai/planTF), [pluto](https://github.com/jchengai/pluto), [StateTransformer](https://github.com/Tsinghua-MARS-Lab/StateTransformer), [DiT](https://github.com/facebookresearch/DiT), [dpm-solver](https://github.com/LuChengTHU/dpm-solver)
+## Known limitation: Diffusion Planner with refinement
+
+The paper's rule-based refinement variant is not included in the public release. The authors used the refinement module from State Transformer 2 ([Diffusion-Planner#14](https://github.com/ZhengYinan-AIR/Diffusion-Planner/issues/14)). The midterm baseline therefore covers only the model without refinement. The rule-based comparison baseline will either port the STR2 refinement module or select among sampled candidates using the PDM-Closed scorer; this choice has not yet been made.

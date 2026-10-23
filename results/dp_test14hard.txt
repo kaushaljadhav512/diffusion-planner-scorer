@@ -1,0 +1,32 @@
+
+=== Closed-loop score (CLS, 0-100) ===
+planner       split challenge   n   CLS  paper  delta           timestamp
+     dp test14-hard        nr 272 74.63  75.99  -1.36 2026-10-19-23-26-48
+     dp test14-hard         r 272 68.63  69.22  -0.59 2026-10-19-23-42-36
+
+=== Per-metric averages (%) ===
+planner       split challenge  no_ego_at_fault_collisions  drivable_area_compliance  driving_direction_compliance  ego_is_making_progress  time_to_collision_within_bound  speed_limit_compliance  ego_progress_along_expert_route  ego_is_comfortable
+     dp test14-hard        nr                        86.8                      95.2                          98.9                    98.5                            76.8                    96.5                             89.7                91.9
+     dp test14-hard         r                        86.6                      95.2                          98.9                    92.3                            80.5                    97.4                             76.7                86.0
+
+=== CLS by scenario type ===
+planner                                                         dp      
+split                                                  test14-hard      
+challenge                                                       nr     r
+scenario_type                                                           
+behind_long_vehicle                                           91.1  80.5
+changing_lane                                                 59.7  76.6
+following_lane_with_lead                                      84.5  79.7
+high_lateral_acceleration                                     58.5  54.6
+high_magnitude_speed                                          88.2  78.9
+low_magnitude_speed                                           52.4  48.1
+near_multiple_vehicles                                        66.8  50.6
+starting_left_turn                                            65.7  67.0
+starting_right_turn                                           69.5  57.8
+starting_straight_traffic_light_intersection_traversal        87.0  90.0
+stationary_in_traffic                                         97.7  67.7
+stopping_with_lead                                            99.1  97.6
+traversing_pickup_dropoff                                     55.1  68.4
+waiting_for_pedestrian_to_cross                               74.8  47.8
+
+wrote results/dp_test14hard.csv

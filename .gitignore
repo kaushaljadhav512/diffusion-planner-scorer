@@ -10,3 +10,8 @@ image*
 exp/
 cache/
 checkpoints/
+
+# project
+third_party/
+urls.txt
+*.pyc
