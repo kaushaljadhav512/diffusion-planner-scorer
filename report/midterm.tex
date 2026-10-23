@@ -154,7 +154,7 @@ We completed two full closed-loop runs of the baseline (NR and R, 272 scenarios 
 Baseline (1) is the vanilla Diffusion Planner: the released checkpoint, run as published, which is equivalent to FirstSample with $K=1$. It is the model our verifier builds on, so any gain from selection is measured against it. The paper's second variant, with rule-based refinement, is not in the public release; the authors used the refinement module of State Transformer~2~\cite{dp_issue14}. We therefore define baseline (2) as PDM selection over the same $K$ Diffusion Planner samples. This is the rule-based selector that our verifier is meant to match or beat, and it chooses from exactly the same candidate set. For PDM-Closed alone, we cite the published Test14-hard scores (65.08 NR, 75.19 R~\cite{zheng2025diffusion}) as a rule-based reference.
 
 \paragraph{Implementation.}
-We pinned nuplan-devkit, Diffusion Planner, and tuplan\_garage to fixed commits and wrote scripts for environment setup, data download, simulation, and result aggregation. The baseline simulations ran on a single desktop workstation with one NVIDIA GeForce RTX 5080 GPU (16\,GB); nuPlan simulation is CPU-bound, so we ran scenarios in parallel across CPU workers.
+We pinned nuplan-devkit, Diffusion Planner, and tuplan\_garage to fixed commits and wrote scripts for environment setup, data download, simulation, and result aggregation. Our code is available at \url{https://github.com/kaushaljadhav512/diffusion-planner-scorer}. The baseline simulations ran on a single desktop workstation with one NVIDIA GeForce RTX 5080 GPU (16\,GB); nuPlan simulation is CPU-bound, so we ran scenarios in parallel across CPU workers.
 
 \begin{table}[t]
 \centering
