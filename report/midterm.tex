@@ -1,69 +1,136 @@
-% Midterm report draft. Paste into the course Overleaf template (NeurIPS style)
-% and upload figures/dp_by_type.pdf. Items marked \todo{} are open.
+% Midterm report, 11-785 course template (NeurIPS 2019 style, report/NIPS_Template.zip).
+% Compile from report/ so neurips_2019.sty and figures/ are found. Items marked \todo{} are open.
 \documentclass{article}
+
+% to compile a camera-ready version, use the [final] option
 \usepackage[final]{neurips_2019}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{hyperref}
-\usepackage{url}
-\usepackage{booktabs}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
 \usepackage{amsmath}
-\usepackage{amsfonts}
 \usepackage{graphicx}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 
-\title{Learning to Pick the Plan: A Learned Trajectory Scorer\\for Diffusion-Based Driving Planners\\(Midterm Report)}
+\title{Learning to Pick the Plan: Test-Time Scaling\\for a Diffusion Planner with a Learned Verifier\\(Midterm Report)}
 
-\author{Risha Ranjan \And Shubham Saboo \And Neha Kayiti \And Kaushal Jadhav \\
-Carnegie Mellon University \\
-\texttt{\{rishar, spsaboo, nkayiti, ksjadhav\}@andrew.cmu.edu}}
+\author{%
+  Risha Ranjan \\
+  Carnegie Mellon University\\
+  Pittsburgh, PA 15213 \\
+  \texttt{rishar@andrew.cmu.edu} \\
+  \And
+  Shubham Saboo \\
+  Carnegie Mellon University\\
+  Pittsburgh, PA 15213 \\
+  \texttt{spsaboo@andrew.cmu.edu} \\
+  \AND
+  Neha Kayiti \\
+  Carnegie Mellon University\\
+  Pittsburgh, PA 15213 \\
+  \texttt{nkayiti@andrew.cmu.edu} \\
+  \And
+  Kaushal Jadhav \\
+  Carnegie Mellon University\\
+  Pittsburgh, PA 15213 \\
+  \texttt{ksjadhav@andrew.cmu.edu} \\
+}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Many learning-based planners for self-driving cars generate several candidate trajectories and then choose one, and the strongest systems still make that final choice with hand-written rules. We are building a learned scorer for Diffusion Planner~\cite{zheng2025diffusion} that predicts how safe and useful each candidate trajectory is and selects the best one. Labels come from a rule-based evaluator run on real driving logs. As a first step, we reproduced the released Diffusion Planner in nuPlan's closed-loop simulator on the Test14-hard benchmark. It scores 74.63 with non-reactive traffic and 68.63 with reactive traffic, within 1.4 points of the published results (75.99 and 69.22). This report describes the reproduction, the scorer design, and the remaining work.
+Diffusion-based driving planners can sample many different plans for the same scene, but they execute only one, and their best published results still rely on hand-written rules to check or refine it. We study test-time scaling for such a planner: sample $K$ candidate trajectories from Diffusion Planner~\cite{zheng2025diffusion} and choose one with a small learned verifier that predicts each candidate's driving-metric scores. The verifier is trained on labels from a rule-based evaluator that is given the logged future motion of other agents, so it learns to imitate an oracle selector rather than the rules with their simplified forecasts. As a first step, we reproduced the released Diffusion Planner in nuPlan's closed-loop simulator on the Test14-hard benchmark. It scores 74.63 with non-reactive traffic and 68.63 with reactive traffic, within 1.4 points of the published results (75.99 and 69.22). This report describes the reproduction, the verifier design, the planned experiments, and the remaining work.
 \end{abstract}
 
 %-------------------------------------------------------------------------
 \section{Overview and context}
 
 \paragraph{Motivation.}
-Learning-based planners can produce flexible, human-like driving, but on standard benchmarks the top results still come from hybrid systems in which a rule-based module checks or selects the final trajectory~\cite{zheng2025diffusion,cheng2024pluto}. These rules can miss situations their designers did not anticipate, and they are slow because they simulate every candidate. Replacing this step with a learned model could make the planner more data-driven and better in rare or difficult scenarios. That would matter to anyone deploying learned planners.
+Learning-based planners can produce flexible, human-like driving, but on standard benchmarks the top results still come from hybrid systems in which a rule-based module checks or selects the final trajectory~\cite{zheng2025diffusion,cheng2024pluto}. These rules rely on simple forecasts of other agents, can miss situations their designers did not anticipate, and are slow because they simulate every candidate. Meanwhile, a generative planner can cheaply produce many candidates per scene. If a learned model can pick the best of them, the planner improves at inference time without retraining, much as best-of-$N$ sampling with a learned verifier improves language models~\cite{cobbe2021verifiers}.
 
 \paragraph{Objectives.}
-Our question is whether a learned scorer can choose trajectories as well as, or better than, hand-written rules, and when each one fails. Our quantitative objectives are:
-(i) match or exceed the closed-loop score (CLS) of a rule-based selector on Test14-hard, in both non-reactive (NR) and reactive (R) traffic;
-(ii) select trajectories faster than the rule-based selector; and
-(iii) test whether a hybrid of learned and rule-based scores beats both.
+Our question is whether sampling more plans and choosing among them with a learned verifier improves closed-loop driving, and how this compares with rule-based selection. Our quantitative objectives, on Test14-hard with non-reactive (NR) and reactive (R) traffic, are:
+(i) improve the closed-loop score (CLS) over the vanilla planner, which executes a single sample;
+(ii) approach or exceed rule-based (PDM) selection over the same candidates, at a fraction of its selection time; and
+(iii) show that the gain grows with the number of candidates $K$.
+If time allows, we will also test whether a hybrid of learned and rule-based scores beats both.
 
 %-------------------------------------------------------------------------
 \section{Related work and background}
 
 \paragraph{Literature review.}
 \emph{Generative planners.} Diffusion Planner~\cite{zheng2025diffusion} and Flow Planner~\cite{tan2025flow} produce diverse trajectories with diffusion or flow matching, but reach their best scores only with rule-based refinement.
-\emph{Candidate selection.} PLUTO~\cite{cheng2024pluto} generates many candidates and selects among them with a mix of learned confidence and a rule-based check. Hydra-MDP~\cite{li2024hydra} and GTRS~\cite{li2025gtrs} train neural scorers that predict rule-based driving metrics for a set of trajectories. GTRS shows that such a scorer can rank trajectories it never saw during training. Our project applies this learned-scoring idea to the candidates of a diffusion planner.
+\emph{Candidate selection.} PLUTO~\cite{cheng2024pluto} generates many candidates and selects among them with a mix of learned confidence and a rule-based check. Hydra-MDP~\cite{li2024hydra} and GTRS~\cite{li2025gtrs} train neural scorers that predict rule-based driving metrics for a set of trajectories. GTRS shows that such a scorer can rank trajectories it never saw during training.
+\emph{Test-time scaling.} In language models, sampling $N$ answers and selecting one with a trained verifier gives large gains that grow with $N$~\cite{cobbe2021verifiers}. Our project applies this best-of-$K$ recipe, with a learned scorer as the verifier, to the samples of a diffusion planner.
 
 \paragraph{Background.}
-Our rule-based reference is PDM-Closed~\cite{dauner2023parting}, which won the 2023 nuPlan challenge. It simulates each candidate and scores it on collisions, drivable-area compliance, progress, and comfort. Its scoring function is also our source of training labels. We evaluate on Test14-hard, introduced by PlanTF~\cite{cheng2024plantf}: 272 scenarios across 14 scenario types, chosen as the cases where PDM-Closed performs worst.
+Our rule-based reference is PDM-Closed~\cite{dauner2023parting}, which won the 2023 nuPlan challenge. It simulates each candidate and scores it on collisions, drivable-area compliance, progress, and comfort, forecasting other agents with a constant-velocity model. We use its scoring function in two ways: as the rule-based selector (with constant-velocity forecasts, as at test time), and as our label source (with the logged future motion of other agents, which is only available offline). We evaluate on Test14-hard, introduced by PlanTF~\cite{cheng2024plantf}: 272 scenarios across 14 scenario types, chosen as the cases where PDM-Closed performs worst.
 
 %-------------------------------------------------------------------------
 \section{Methodology}
 
-\paragraph{Base planner.}
-Diffusion Planner~\cite{zheng2025diffusion} is a diffusion-transformer planner that jointly denoises the future trajectories of the ego vehicle and nearby agents. Its inputs, in the ego frame, are: the past 2\,s (21 frames at 10\,Hz) of up to 32 neighboring agents ($32\times21\times11$); 5 static objects ($5\times10$); 70 lane segments ($70\times20\times12$, i.e., 20 points per lane with 12 features per point); and 25 route lanes ($25\times20\times12$). It outputs 8\,s (80 steps) of future trajectory for the ego vehicle and the 10 nearest agents. The encoder and decoder each have 3 transformer layers, with hidden size 192 and 6 attention heads. Because sampling is stochastic, repeated sampling (or guidance) yields a set of $K$ candidate trajectories for the same scene.
+\paragraph{Base planner and candidate sampling.}
+Diffusion Planner~\cite{zheng2025diffusion} is a diffusion-transformer planner that jointly denoises the future trajectories of the ego vehicle and nearby agents. Its inputs, in the ego frame, are: the past 2\,s (21 frames at 10\,Hz) of up to 32 neighboring agents ($32\times21\times11$); 5 static objects ($5\times10$); 70 lane segments ($70\times20\times12$, i.e., 20 points per lane with 12 features per point); and 25 route lanes ($25\times20\times12$). It outputs 8\,s (80 steps) of future trajectory for the ego vehicle and the 10 nearest agents. The encoder and decoder each have 3 transformer layers, with hidden size 192 and 6 attention heads. To obtain $K$ candidates, we run the encoder once and denoise $K$ independent noise draws in one batch, giving an output of shape $B\times K\times11\times80\times4$. With $K=1$ this reduces exactly to the released planner.
 
-\paragraph{Proposed scorer.}
-The scorer reuses Diffusion Planner's scene encoder. Each of the $K$ candidate ego trajectories ($K\times80\times4$: $x$, $y$, $\cos\theta$, $\sin\theta$) is embedded with a small MLP into one token. A lightweight transformer then lets each candidate token attend to the scene tokens and to the other candidates. Per-metric heads output, for each candidate, the predicted probability of each PDM sub-metric: no at-fault collision, drivable-area compliance, driving-direction compliance, and making progress, plus the weighted time-to-collision, progress, and comfort terms. The predicted metrics are combined with the same formula as the CLS (Eq.~\ref{eq:cls}), and the highest-scoring candidate is executed. The hybrid variant uses $s = \lambda\,s_{\text{learned}} + (1-\lambda)\,s_{\text{PDM}}$. \todo{Insert architecture diagram (scene encoder $\rightarrow$ candidate tokens $\rightarrow$ transformer $\rightarrow$ metric heads), with tensor shapes.}
+\paragraph{Selectors.}
+Every method executes one of the same $K$ candidates and differs only in how it picks it:
+\emph{FirstSample} takes the first candidate (equivalent to the vanilla planner, $K=1$);
+\emph{Random} picks one uniformly;
+\emph{PDM} scores candidates with the PDM-Closed scorer using constant-velocity forecasts (our rule-based baseline);
+\emph{Oracle} uses the same scorer with the logged future motion of other agents (an upper bound, defined only for non-reactive traffic, where agents follow the log);
+\emph{Learned} uses our verifier; and
+\emph{Hybrid} uses $s = \lambda\,s_{\text{learned}} + (1-\lambda)\,s_{\text{PDM}}$.
+
+\paragraph{Proposed verifier.}
+The verifier reuses Diffusion Planner's scene encoder, kept frozen, which produces 107 scene tokens of size 192. Each of the $K$ candidate ego trajectories ($K\times80\times4$: $x$, $y$, $\cos\theta$, $\sin\theta$) is embedded with a small MLP into one token. A 2--3 layer transformer then lets each candidate token attend to the scene tokens and to the other candidates. Per-metric heads output, for each candidate, the predicted probability of each PDM sub-metric: no at-fault collision, drivable-area compliance, driving-direction compliance, and making progress, plus the weighted time-to-collision, progress, and comfort terms. The predicted metrics are combined with the same formula as the CLS (Eq.~\ref{eq:cls}), and the highest-scoring candidate is executed. Because the labels use logged futures, the verifier learns to imitate the Oracle selector, not the PDM selector. Figure~\ref{fig:arch} shows the full architecture.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize, >=Stealth,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.9cm, inner sep=3pt},
+  frozen/.style={box, fill=gray!15},
+  train/.style={box, fill=blue!12},
+  lab/.style={font=\scriptsize, midway, above}
+]
+\node[align=center] (in) at (0,0) {Scene inputs\\(agents, lanes,\\objects, route)};
+\node[frozen, minimum width=2.4cm] (enc) at (3,0) {DP encoder\\(frozen)};
+\node[frozen, minimum width=2.4cm] (dec) at (3,-1.8) {DP decoder\\($K$ noise draws)};
+\node[train, minimum width=1.4cm] (mlp) at (6.4,-1.8) {MLP};
+\node[train, minimum width=2.6cm, minimum height=2.7cm] (tf) at (9.6,-0.9)
+  {Transformer\\(2--3 layers)\\[3pt]{\scriptsize candidates attend}\\{\scriptsize to scene tokens}\\{\scriptsize and each other}};
+\node[train, minimum width=2.6cm] (heads) at (9.6,-3.6) {Per-metric heads};
+\node[box, minimum width=2.0cm] (cls) at (5.9,-3.6) {CLS formula\\(Eq.~\ref{eq:cls})};
+\node[box, minimum width=2.4cm] (sel) at (2.6,-3.6) {$\arg\max$ over $K$\\$\rightarrow$ executed plan};
+\draw[->] (in) -- (enc);
+\draw[->] (enc.east) -- node[lab]{$107\times192$ scene tokens} (enc.east -| tf.west);
+\draw[->] (enc) -- (dec);
+\draw[->] (dec) -- node[lab]{$K\times80\times4$} (mlp);
+\draw[->] (mlp.east) -- node[lab]{$K\times192$} (mlp.east -| tf.west);
+\draw[->] (tf) -- node[right, font=\scriptsize]{$K\times192$} (heads);
+\draw[->] (heads) -- node[lab]{$K\times M$} (cls);
+\draw[->] (cls) -- node[lab]{scores} (sel);
+\end{tikzpicture}
+\caption{Verifier architecture. Gray blocks are Diffusion Planner modules kept frozen, and blue blocks are trained. The encoder runs once per scene, and the decoder denoises $K$ noise draws in one batch to produce the candidates. $M$ is the number of predicted PDM sub-metrics.}
+\label{fig:arch}
+\end{figure}
 
 \paragraph{Dataset.}
 We use nuPlan~\cite{caesar2021nuplan}, a large real-world driving dataset with a closed-loop simulator. Evaluation uses the nuPlan v1.1 test split, filtered to the Test14-hard scenarios. Because nuPlan provides no scores for alternative trajectories, we generate our own labels. The steps are:
-(1) sample a subset of \todo{N} scenarios from the training split;
-(2) run the frozen Diffusion Planner to produce $K=$\todo{K} candidates per scene;
-(3) score each candidate with the PDM-Closed scorer, using the logged future motion of other agents; and
-(4) store (scene features, candidates, per-metric labels) for training.
-\todo{Fill in subset size, $K$, sampling scheme, train/val split, storage format, and the batch construction (one scene with its $K$ candidates per sample).}
+(1) sample 50--100k scenes (a few timesteps per scenario) from a subset of the training split, never the test split, since Test14-hard is drawn from it;
+(2) run the frozen Diffusion Planner to produce $K$ candidates per scene;
+(3) score each candidate with the PDM-Closed scorer, using the logged future motion of other agents, and also with constant-velocity forecasts for an ablation; and
+(4) store one file per scene with the scene features, the candidates ($K\times80\times4$), and the per-metric labels.
+Each training sample is one scene with its $K$ candidates. We hold out 10\% of the scenes for validation. We will choose $K$ and the sampling noise scale after checking how diverse the candidates are.
 
 \paragraph{Evaluation metric.}
 Our main metric is nuPlan's closed-loop score. For each scenario,
@@ -71,22 +138,23 @@ Our main metric is nuPlan's closed-loop score. For each scenario,
 \text{CLS} = \underbrace{\prod_{m\in\mathcal{M}} m}_{\text{multipliers}} \cdot \frac{5\,\text{TTC} + 5\,\text{EP} + 4\,\text{SL} + 2\,\text{C}}{16},
 \label{eq:cls}
 \end{equation}
-where $\mathcal{M}$ contains no at-fault collision, drivable-area compliance, driving-direction compliance, and making progress. TTC is time-to-collision within bound, EP is ego progress along the expert route, SL is speed-limit compliance, and C is comfort. The benchmark score is the mean CLS over scenarios, scaled to 0--100. We report it with non-reactive (log-replay) and reactive (IDM) agents. As offline diagnostics, we will also report top-1 accuracy and regret against the best candidate under the PDM labels, along with selection latency.
+where $\mathcal{M}$ contains no at-fault collision, drivable-area compliance, driving-direction compliance, and making progress. TTC is time-to-collision within bound, EP is ego progress along the expert route, SL is speed-limit compliance, and C is comfort. The benchmark score is the mean CLS over scenarios, scaled to 0--100. We report it with non-reactive (log-replay) and reactive (IDM) agents. Our two headline results are (a) CLS as a function of $K\in\{1,4,8,16,32\}$ for FirstSample, PDM, the learned verifier, and the Oracle, and (b) CLS against selection time per planning step (ms) for the learned and PDM selectors. Final closed-loop numbers use 2--3 seeds and are reported as mean $\pm$ standard deviation; development runs and ablations use a fixed 100-scenario subset of Test14-hard with an equal number of scenarios per type. As offline diagnostics, we also report top-1 accuracy and regret against the best candidate under the labels.
 
 \paragraph{Loss function.}
-Each binary metric head is trained with binary cross-entropy, and each continuous head with binary cross-entropy against its soft label in $[0,1]$. The total loss is a weighted sum over metric heads. \todo{Confirm the loss weights and optimizer once training starts.}
+Each binary metric head is trained with binary cross-entropy, and each continuous head with binary cross-entropy against its soft label in $[0,1]$. The total loss is a weighted sum over metric heads.
 
 \paragraph{Experimental iterations so far.}
-We completed two full closed-loop runs of the baseline (NR and R, 272 scenarios each), preceded by 5-scenario smoke tests to validate the pipeline. \todo{Add the PDM-Closed reference run and/or the candidate-headroom experiment (Section~\ref{sec:next}) as further iterations.}
+We completed two full closed-loop runs of the baseline (NR and R, 272 scenarios each), preceded by 5-scenario smoke tests to validate the pipeline.
 
 %-------------------------------------------------------------------------
 \section{Baseline and extensions}
+\label{sec:baselines}
 
 \paragraph{Baseline selection.}
-Baseline (1) is Diffusion Planner without any selection step: the released checkpoint, run as published. It is the model our scorer builds on, so any gain from the scorer is measured against it. The paper's second variant, with rule-based refinement, is not in the public release; the authors used the refinement module of State Transformer~2~\cite{dp_issue14}. \todo{State the decision for baseline (2): we propose to select among $K$ sampled Diffusion Planner candidates with the PDM-Closed scorer. This is the rule-based selector that our learned scorer is meant to replace, and it scores the same candidate set.} PDM-Closed alone is reported as a rule-based reference.
+Baseline (1) is the vanilla Diffusion Planner: the released checkpoint, run as published, which is equivalent to FirstSample with $K=1$. It is the model our verifier builds on, so any gain from selection is measured against it. The paper's second variant, with rule-based refinement, is not in the public release; the authors used the refinement module of State Transformer~2~\cite{dp_issue14}. We therefore define baseline (2) as PDM selection over the same $K$ Diffusion Planner samples. This is the rule-based selector that our verifier is meant to match or beat, and it chooses from exactly the same candidate set. For PDM-Closed alone, we cite the published Test14-hard scores (65.08 NR, 75.19 R~\cite{zheng2025diffusion}) as a rule-based reference.
 
 \paragraph{Implementation.}
-We pinned nuplan-devkit, Diffusion Planner, and tuplan\_garage to fixed commits and wrote scripts for environment setup, data download, simulation, and result aggregation. Simulations ran on AWS (\todo{instance type, GPU, vCPUs, RAM, parallel workers}). Each 272-scenario run took \todo{wall-clock time}.
+We pinned nuplan-devkit, Diffusion Planner, and tuplan\_garage to fixed commits and wrote scripts for environment setup, data download, simulation, and result aggregation. The baseline simulations ran on a single desktop workstation with one NVIDIA GeForce RTX 5080 GPU (16\,GB); nuPlan simulation is CPU-bound, so we ran scenarios in parallel across CPU workers.
 
 \begin{table}[t]
 \centering
@@ -121,48 +189,53 @@ Comfort                        & 91.9 & 86.0 \\
 \end{figure}
 
 \paragraph{Baseline reproduction evidence.}
-Table~\ref{tab:baseline} shows that our CLS is within 1.4 (NR) and 0.6 (R) points of the published numbers. Possible sources of the gap are stochastic diffusion sampling (we ran one seed per setting), upstream code changes since publication, and differences in library versions and hardware. \todo{Add a second seed if budget allows, to estimate run-to-run variance.}
+Table~\ref{tab:baseline} shows that our CLS is within 1.4 (NR) and 0.6 (R) points of the published numbers. Possible sources of the gap are stochastic diffusion sampling (we ran one seed per setting), upstream code changes since publication, and differences in library versions and hardware. Final comparisons will use 2--3 seeds to measure this run-to-run variance.
 
-\paragraph{Planned extensions.}
-(1) A learned scorer that replaces the rule-based selector.
-(2) A hybrid scorer that combines learned and rule-based scores, with $\lambda$ swept.
-We will also vary the training candidates (a fixed trajectory vocabulary vs.\ planner samples) and whether the scene encoder is frozen or fine-tuned.
+\paragraph{Planned extensions and ablations.}
+(1) The learned verifier, evaluated across $K$.
+(2) Labels from logged futures vs.\ constant-velocity forecasts: does learning from logged futures beat the rules' forecasting assumption?
+(3) The verifier with vs.\ without scene input: does it actually use the scene, or only the shape of the trajectory?
+(4) If time allows, the hybrid scorer with $\lambda$ swept.
 
 %-------------------------------------------------------------------------
 \section{Preliminary results}
 
-Figure~\ref{fig:bytype} breaks the baseline down by scenario type. The weakest types in both settings are \emph{low magnitude speed} (52.4 NR / 48.1 R), \emph{high lateral acceleration} (58.5 / 54.6), and \emph{traversing pickup/dropoff} (55.1 NR). With reactive agents, the largest drops are in \emph{waiting for pedestrian to cross} ($74.8\rightarrow47.8$), \emph{stationary in traffic} ($97.7\rightarrow67.7$), and \emph{near multiple vehicles} ($66.8\rightarrow50.6$). Table~\ref{tab:baseline} shows that these drops come mostly from lower progress along the expert route ($89.7\rightarrow76.7$) and more frequent failures to make progress, not from more collisions (86.8 vs.\ 86.6). This suggests the planner becomes overly hesitant when other agents respond to it. A selector that can trade a small amount of safety margin for progress, chosen per scene, is the kind of decision a learned scorer could make better than a fixed output. These scenario types are where we expect the largest gains, and we will report results broken down by them.
-\todo{If the headroom experiment is done: report how often the best of $K$ candidates (under PDM labels) beats the default output, as an upper bound on what selection can gain.}
+Figure~\ref{fig:bytype} breaks the baseline down by scenario type. The weakest types in both settings are \emph{low magnitude speed} (52.4 NR / 48.1 R), \emph{high lateral acceleration} (58.5 / 54.6), and \emph{traversing pickup/dropoff} (55.1 NR). With reactive agents, the largest drops are in \emph{waiting for pedestrian to cross} ($74.8\rightarrow47.8$), \emph{stationary in traffic} ($97.7\rightarrow67.7$), and \emph{near multiple vehicles} ($66.8\rightarrow50.6$). Table~\ref{tab:baseline} shows that these drops come mostly from lower progress along the expert route ($89.7\rightarrow76.7$) and more frequent failures to make progress, not from more collisions (86.8 vs.\ 86.6). This suggests the planner becomes overly hesitant when other agents respond to it. If the $K$ samples include plans that make more progress in these scenes, a selector can choose them per scene, which a single sample cannot. These scenario types are where we expect the largest gains, and we will report results broken down by them.
 
 %-------------------------------------------------------------------------
 \section{Discussion: challenges and risks}
 
 \paragraph{Challenges so far.}
-(1) The rule-based refinement variant of Diffusion Planner is not public, so the second baseline has to be redefined (Section~4).
-(2) Compute moved from the Pittsburgh Supercomputing Center, planned in the proposal, to AWS course credits (about \$150 per member). We therefore evaluate on subsets during development and run full benchmarks only for final comparisons.
-(3) Setting up nuPlan (dataset licensing, large downloads, simulator dependencies) took a large share of the time before the midterm.
+(1) The rule-based refinement variant of Diffusion Planner is not public, so the second baseline had to be redefined as PDM selection over $K$ samples (Section~\ref{sec:baselines}).
+(2) We did not get timely access to the Pittsburgh Supercomputing Center (PSC), planned in the proposal, or to AWS course credits, so we moved to our own local machines. Setting them up for nuPlan (simulator dependencies and large dataset downloads) took a large share of the time before the midterm.
 
 \paragraph{Risks.}
-(1) Label generation runs the PDM scorer on $K$ candidates for every training scene and may be expensive; we will start from a small subset and scale up.
-(2) Training on a subset may yield lower absolute scores than the original papers. We mitigate this by comparing every method under the same setup.
-(3) Val14 requires the validation split, which we have not downloaded yet. \todo{Decide whether Val14 is in scope for the final report.}
+(1) Our main risk is that the $K$ samples are too similar to each other, so that even the Oracle finds little to gain. The whole project rests on this assumption, and comparing the Oracle with FirstSample (Section~\ref{sec:next}) tests it directly. If the samples turn out too similar, we will raise the sampling noise, sample with different guidance settings, or add PDM-Closed's own proposals to the candidate set, which guarantees variety.
+(2) The PDM score looks only a few seconds ahead, so it may not predict how well a plan does over a full closed-loop run. We will score candidates over the full 8\,s using the logged futures and check that the Oracle's choices really do raise the closed-loop score.
+(3) Small gains could be hidden by run-to-run noise. We will run the final experiments with two to three seeds and treat differences below about one point as noise.
+We evaluate only on Test14-hard, and Val14 is out of scope.
 
 %-------------------------------------------------------------------------
 \section{Next steps}
 \label{sec:next}
-\begin{enumerate}
-\item Implement baseline (2): PDM-scorer selection over $K$ Diffusion Planner samples; run Test14-hard NR/R. Also run PDM-Closed as a reference.
-\item Candidate-headroom study on a subset: the gap between the default output and the best of $K$ candidates.
-\item Label-generation pipeline on a training subset (\todo{owner}).
-\item Train a first scorer with offline top-1/regret evaluation, then closed-loop evaluation.
-\item Hybrid scorer and ablations (candidate source, frozen vs.\ fine-tuned encoder, $\lambda$).
-\end{enumerate}
-\todo{Add dates/owners per item.}
+\begin{itemize}
+\item Build a sampler that draws $K$ candidates in one batch, and check that it reproduces the released planner when $K=1$.
+\item Implement the FirstSample and Random selectors, and fix a 100-scenario development subset of Test14-hard.
+\item Integrate the PDM-Closed scorer as a selector. This means converting each candidate from the ego frame to the global frame and scoring it with constant-velocity forecasts of the other agents.
+\item Create the Oracle selector, which uses the same scorer but with the logged future motion of the other agents.
+\item Compare the Oracle with FirstSample on the development subset to check whether the $K$ samples differ enough for selection to help. If they do not, try a higher sampling noise, different guidance settings, or a candidate set that also includes PDM-Closed's proposals.
+\item Generate labels for 50 to 100 thousand training scenes and check that the labels differ between candidates of the same scene.
+\item Train the verifier, evaluate it offline by top-1 accuracy and regret, and run the two core ablations.
+\item Run the full Test14-hard benchmark with two to three seeds, sweep $K$, measure selection time, and analyze failure cases.
+\end{itemize}
 
 \paragraph{Team contributions.}
-\todo{Update: e.g., Shubham: setup scripts / dataset; Risha: baseline simulation runs; Neha: label generation; Kaushal: evaluation scripts, analysis, report.}
+Shubham: dataset and simulator setup; Neha: label generation pipeline; Risha: scorer model and training; Kaushal: evaluation and analysis. All members will contribute to experiments and writing.
 
-\begin{thebibliography}{99}\small
+\medskip
+\small
+\begin{thebibliography}{99}
+\bibitem{cobbe2021verifiers} K.~Cobbe, V.~Kosaraju, M.~Bavarian, et al. Training verifiers to solve math word problems. arXiv:2110.14168, 2021.
 \bibitem{caesar2021nuplan} H.~Caesar et al. nuPlan: A closed-loop ML-based planning benchmark for autonomous vehicles. In \emph{CVPR Workshops}, 2021.
 \bibitem{cheng2024plantf} J.~Cheng, Y.~Chen, X.~Mei, B.~Yang, B.~Li, and M.~Liu. Rethinking imitation-based planners for autonomous driving. In \emph{ICRA}, 2024.
 \bibitem{cheng2024pluto} J.~Cheng, Y.~Chen, and Q.~Chen. PLUTO: Pushing the limit of imitation learning-based planning for autonomous driving. arXiv:2404.14327, 2024.
