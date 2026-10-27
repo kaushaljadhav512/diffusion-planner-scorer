@@ -3,6 +3,7 @@
 #
 #   scripts/run_sim.sh <planner> <split> <challenge> [extra hydra overrides...]
 #     planner:   dp          Diffusion Planner, released checkpoint, no refinement
+#                dp_k        best-of-K Diffusion Planner (diffusion_planner/scorer), see K / SELECTOR / NOISE
 #                pdm_closed  PDM-Closed (rule-based reference)
 #     split:     val14 | test14-hard | test14-random
 #     challenge: nr (non-reactive agents) | r (reactive agents)
@@ -14,10 +15,16 @@
 #   GPU_FRAC=f     GPU share per simulation for dp (default: ngpus / threads, so every
 #                  thread gets a sim; the released model is small enough for this)
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
+#   dp_k only:
+#   K=N            candidates per step (default 16)
+#   SELECTOR=s     first | random (default first)
+#   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
+#   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>] so different settings don't overwrite
+#   each other in summarize_results.py.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../setup/config.env"
 
-PLANNER="${1:?planner: dp | pdm_closed}"
+PLANNER="${1:?planner: dp | dp_k | pdm_closed}"
 SPLIT="${2:?split: val14 | test14-hard | test14-random}"
 CH="${3:?challenge: nr | r}"
 shift 3
@@ -36,10 +43,13 @@ THREADS="${THREADS:-$(( RAM_GB / 3 < $(nproc) ? RAM_GB / 3 : $(nproc) ))}"
 NGPU="$( (nvidia-smi -L 2>/dev/null || true) | grep -c '^GPU' || true)"
 GPU_FRAC="${GPU_FRAC:-$(python3 -c "print(round(max($NGPU,1)/$THREADS, 4))")}"
 if [ "$NGPU" -eq 0 ]; then
-  GPU_ARGS=(gpu=false number_of_gpus_allocated_per_simulation=0 planner.diffusion_planner.device=cpu)
+  GPU_ARGS=(gpu=false number_of_gpus_allocated_per_simulation=0)
+  DP_DEVICE=cpu
 else
   GPU_ARGS=(number_of_gpus_allocated_per_simulation="$GPU_FRAC")
+  DP_DEVICE=cuda
 fi
+NAME="$PLANNER"
 
 # Use Diffusion Planner's scenario_filter configs for every planner so all rows of the
 # results table are evaluated on exactly the same scenario tokens.
@@ -50,6 +60,29 @@ case "$PLANNER" in
       planner=diffusion_planner
       planner.diffusion_planner.config.args_file="$DP_ROOT/checkpoints/args.json"
       planner.diffusion_planner.ckpt_path="$DP_ROOT/checkpoints/model.pth"
+      planner.diffusion_planner.device="$DP_DEVICE"
+      "${GPU_ARGS[@]}"
+    )
+    ;;
+  dp_k)
+    K="${K:-16}"
+    SELECTOR="${SELECTOR:-first}"
+    NOISE="${NOISE:-0.5}"
+    case "$SELECTOR" in
+      first)  SELECTOR_TARGET=diffusion_planner.scorer.selectors.FirstSample ;;
+      random) SELECTOR_TARGET=diffusion_planner.scorer.selectors.Random ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random)"; exit 1 ;;
+    esac
+    NAME="dp_k${K}_${SELECTOR}"
+    [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE}"
+    PLANNER_ARGS=(
+      planner=diffusion_planner_k
+      planner.diffusion_planner_k.config.args_file="$DP_ROOT/checkpoints/args.json"
+      planner.diffusion_planner_k.ckpt_path="$DP_ROOT/checkpoints/model.pth"
+      planner.diffusion_planner_k.device="$DP_DEVICE"
+      planner.diffusion_planner_k.K="$K"
+      planner.diffusion_planner_k.noise_scale="$NOISE"
+      planner.diffusion_planner_k.selector._target_="$SELECTOR_TARGET"
       "${GPU_ARGS[@]}"
     )
     ;;
@@ -69,8 +102,8 @@ if [ -n "${SMOKE:-}" ]; then
 fi
 
 # Output: $NUPLAN_EXP_ROOT/exp/simulation/<challenge>/<planner>/<split><tag>/<timestamp>/
-UID_="$PLANNER/$SPLIT$TAG/$(date +%Y-%m-%d-%H-%M-%S)"
-echo "[run_sim] $PLANNER | $SPLIT$TAG | $CHALLENGE | threads=$THREADS (ram=${RAM_GB}GB) gpus=$NGPU gpu_frac=$GPU_FRAC"
+UID_="$NAME/$SPLIT$TAG/$(date +%Y-%m-%d-%H-%M-%S)"
+echo "[run_sim] $NAME | $SPLIT$TAG | $CHALLENGE | threads=$THREADS (ram=${RAM_GB}GB) gpus=$NGPU gpu_frac=$GPU_FRAC"
 
 export HYDRA_FULL_ERROR=1
 python "$NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_simulation.py" \
