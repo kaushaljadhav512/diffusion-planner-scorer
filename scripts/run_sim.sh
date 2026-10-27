@@ -17,7 +17,7 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random (default first)
+#   SELECTOR=s     first | random | pdm (default first)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
 #   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>] so different settings don't overwrite
 #   each other in summarize_results.py.
@@ -71,7 +71,8 @@ case "$PLANNER" in
     case "$SELECTOR" in
       first)  SELECTOR_TARGET=diffusion_planner.scorer.selectors.FirstSample ;;
       random) SELECTOR_TARGET=diffusion_planner.scorer.selectors.Random ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random)"; exit 1 ;;
+      pdm)    SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMSelector ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm)"; exit 1 ;;
     esac
     NAME="dp_k${K}_${SELECTOR}"
     [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE}"

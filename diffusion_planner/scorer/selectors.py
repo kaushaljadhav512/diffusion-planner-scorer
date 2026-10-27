@@ -63,6 +63,38 @@ class Random(AbstractSelector):
         return torch.randint(0, K, (B,), generator=self._generator).to(candidates.device)
 
 
+class PDMSelector(AbstractSelector):
+    """
+    Baseline (2): PDM-Closed's scorer over the K DP candidates, with constant-velocity forecasts of the other agents.
+    Scores the first 4 s of each ego plan after LQR tracking; ties (including all-zero) go to the lowest index,
+    so it falls back to candidate 0 (vanilla DP) when it cannot tell candidates apart. No emergency brake.
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40):
+        # Lazy import: nuplan / tuplan_garage are only needed when this selector is used
+        from diffusion_planner.scorer.pdm_scoring import PDMCandidateScorer
+
+        self._scorer = PDMCandidateScorer(map_radius=map_radius, proposal_poses=proposal_poses)
+        self.last_scores = None
+
+    def initialize(self, initialization: "PlannerInitialization") -> None:
+        self._scorer.initialize(initialization)
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        assert candidates.shape[0] == 1, "PDMSelector scores one scene (closed-loop simulation)"
+        assert context.planner_input is not None, "PDMSelector needs the PlannerInput"
+
+        ego_plans = candidates[0, :, 0].detach().cpu().numpy().astype("float64") # [K, T, 4]
+        self.last_scores = self._scorer.score(context.planner_input, ego_plans)  # [K]
+
+        # np.argmax returns the first maximum, i.e. the lowest index on ties
+        return torch.tensor([int(self.last_scores.argmax())], dtype=torch.long, device=candidates.device)
+
+    def last_metrics(self):
+        """Per-metric PDM scores of the last select() call, see PDMCandidateScorer.last_metrics."""
+        return self._scorer.last_metrics()
+
+
 def gather_selected(candidates: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     """
     Args:
