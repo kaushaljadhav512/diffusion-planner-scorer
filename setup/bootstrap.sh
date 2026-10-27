@@ -41,7 +41,7 @@ pip install -r "$NUPLAN_DEVKIT_ROOT/requirements.txt"
 log "Diffusion-Planner (this repository)"
 pip install -e "$DP_ROOT"
 # Upstream requirements_torch.txt points at a Tsinghua PyPI mirror (slow from AWS); same pins, official index.
-pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 pip install pytorch_lightning==2.0.1 tensorboard==2.11.2 timm==1.0.10 mmengine
 
 log "tuplan_garage @ $TUPLAN_COMMIT (PDM-Closed reference baseline)"
