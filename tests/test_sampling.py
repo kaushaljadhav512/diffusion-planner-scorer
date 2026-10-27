@@ -51,7 +51,7 @@ def setup():
         config.device = "cpu"
         model = Diffusion_Planner(config)
         # Same loading as DiffusionPlanner.initialize
-        state_dict = torch.load(CKPT_FILE, map_location="cpu")["ema_state_dict"]
+        state_dict = torch.load(CKPT_FILE, map_location="cpu", weights_only=False)["ema_state_dict"]
         model.load_state_dict({k[len("module."):]: v for k, v in state_dict.items() if k.startswith("module.")})
     else:
         config = _random_config()

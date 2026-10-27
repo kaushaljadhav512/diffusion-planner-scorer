@@ -41,7 +41,15 @@ pip install -r "$NUPLAN_DEVKIT_ROOT/requirements.txt"
 log "Diffusion-Planner (this repository)"
 pip install -e "$DP_ROOT"
 # Upstream requirements_torch.txt points at a Tsinghua PyPI mirror (slow from AWS); same pins, official index.
-pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+# Blackwell GPUs (RTX 50xx, compute capability 12.x) have no kernels in torch 2.0 / CUDA 11.8 and need
+# torch >= 2.7 built for CUDA 12.8. Everything else (including no GPU) keeps upstream's pins.
+GPU_CC_MAJOR="$( (nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null || true) | head -1 | cut -d. -f1)"
+if [ "${GPU_CC_MAJOR:-0}" -ge 12 ]; then
+  log "Compute capability ${GPU_CC_MAJOR}.x GPU: installing torch 2.7.1 (CUDA 12.8)"
+  pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+else
+  pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+fi
 pip install pytorch_lightning==2.0.1 tensorboard==2.11.2 timm==1.0.10 mmengine
 
 log "tuplan_garage @ $TUPLAN_COMMIT (PDM-Closed reference baseline)"
@@ -65,7 +73,11 @@ python - <<'EOF'
 import torch, nuplan, diffusion_planner, tuplan_garage
 print("torch", torch.__version__, "| cuda available:", torch.cuda.is_available(),
       "|", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NO GPU")
-sd = torch.load(f"{__import__('os').environ['DP_ROOT']}/checkpoints/model.pth", map_location="cpu")
+if torch.cuda.is_available():
+    # is_available() is True even when the build has no kernels for this GPU; a real op catches that
+    x = torch.randn(256, 256, device="cuda")
+    print("cuda matmul ok:", torch.isfinite(x @ x).all().item())
+sd = torch.load(f"{__import__('os').environ['DP_ROOT']}/checkpoints/model.pth", map_location="cpu", weights_only=False)
 print("checkpoint loaded, top-level keys:", list(sd.keys())[:5] if isinstance(sd, dict) else type(sd))
 EOF
 

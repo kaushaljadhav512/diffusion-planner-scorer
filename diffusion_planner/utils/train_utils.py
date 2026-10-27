@@ -65,7 +65,8 @@ def resume_model(path: str, model, optimizer, scheduler, ema, device):
     path = os.path.join(path, 'latest.pth')
     ckpt = fileio.get(path)
     with io.BytesIO(ckpt) as f:
-        ckpt = torch.load(f)
+        # weights_only=False: torch >= 2.6 defaults to True and the resume ckpt holds optimizer state
+        ckpt = torch.load(f, weights_only=False)
 
     # load model
     try:

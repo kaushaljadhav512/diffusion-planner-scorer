@@ -46,7 +46,7 @@ def load_model(args_file, ckpt_path, device):
     config.device = device
     model = Diffusion_Planner(config)
     # Same loading as DiffusionPlanner.initialize (EMA weights, strip the DDP prefix)
-    state_dict = torch.load(ckpt_path, map_location=device)["ema_state_dict"]
+    state_dict = torch.load(ckpt_path, map_location=device, weights_only=False)["ema_state_dict"]
     model.load_state_dict({k[len("module."):]: v for k, v in state_dict.items() if k.startswith("module.")})
     return config, model.eval().to(device)
 

@@ -80,7 +80,8 @@ class DiffusionPlanner(AbstractPlanner):
         self._route_roadblock_ids = initialization.route_roadblock_ids
 
         if self._ckpt_path is not None:
-            state_dict:Dict = torch.load(self._ckpt_path, map_location=self._device)
+            # weights_only=False: torch >= 2.6 defaults to True (Blackwell GPUs need torch 2.7)
+            state_dict:Dict = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
             
             if self._ema_enabled:
                 state_dict = state_dict['ema_state_dict']
