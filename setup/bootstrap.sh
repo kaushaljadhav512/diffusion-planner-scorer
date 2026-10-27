@@ -26,6 +26,8 @@ CONDA_BASE="$(command -v conda >/dev/null && conda info --base || echo "$HOME/mi
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda env list | grep -q "^$CONDA_ENV " || conda create -y -n "$CONDA_ENV" python=3.9
 conda activate "$CONDA_ENV"
+# pip >= 24.1 rejects omegaconf 2.1.0rc1's metadata, which nuplan-devkit's hydra-core==1.1.0rc1 pin requires.
+pip install "pip<24.1"
 
 clone_pinned() {  # url dir commit
   [ -d "$2/.git" ] || git clone "$1" "$2"
