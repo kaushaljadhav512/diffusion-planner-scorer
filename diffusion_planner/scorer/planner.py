@@ -1,4 +1,6 @@
-from typing import Optional
+import time
+from dataclasses import dataclass
+from typing import List, Optional
 
 import torch
 
@@ -7,11 +9,22 @@ from nuplan.planning.simulation.trajectory.trajectory_sampling import Trajectory
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
 from nuplan.planning.simulation.planner.abstract_planner import PlannerInitialization, PlannerInput
+from nuplan.planning.simulation.planner.planner_report import PlannerReport
 
 from diffusion_planner.planner.planner import DiffusionPlanner
 from diffusion_planner.scorer.sampling import sample_candidates
 from diffusion_planner.scorer.selectors import AbstractSelector, SelectionContext, gather_selected
 from diffusion_planner.utils.config import Config
+
+
+@dataclass(frozen=True)
+class MultiSamplePlannerReport(PlannerReport):
+    """
+    Per-step runtimes [s] of the two stages of a step. nuPlan stores their per-scenario mean / median / std in the
+    run's runner_report.parquet as <field>_mean etc. (see scripts/summarize_results.py).
+    """
+    sampling_runtimes: List[float]  # K candidates from the diffusion model
+    selection_runtimes: List[float] # selector.select
 
 
 class MultiSampleDiffusionPlanner(DiffusionPlanner):
@@ -51,6 +64,9 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         self._steps = steps
         self._seed = seed
 
+        self._sampling_runtimes: List[float] = []
+        self._selection_runtimes: List[float] = []
+
     def name(self) -> str:
         """
         Inherited.
@@ -74,10 +90,16 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         inputs = self.planner_input_to_model_inputs(current_input)
 
         inputs = self.observation_normalizer(inputs)
-        candidates = sample_candidates(self._planner, inputs, self._K, self._noise_scale, self._steps) # [1, K, P, T, 4]
 
+        start = time.perf_counter()
+        candidates = sample_candidates(self._planner, inputs, self._K, self._noise_scale, self._steps) # [1, K, P, T, 4]
+        self._sampling_runtimes.append(_elapsed(start, candidates))
+
+        start = time.perf_counter()
         context = SelectionContext(inputs=inputs, planner_input=current_input, scenario=self._scenario)
         indices = self._selector.select(candidates, context)
+        self._selection_runtimes.append(_elapsed(start, indices))
+
         outputs = {"prediction": gather_selected(candidates, indices)} # [1, P, T, 4]
 
         trajectory = InterpolatedTrajectory(
@@ -85,3 +107,25 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         )
 
         return trajectory
+
+    def generate_planner_report(self, clear_stats: bool = True) -> PlannerReport:
+        """
+        Inherited.
+        """
+        report = MultiSamplePlannerReport(
+            compute_trajectory_runtimes=self._compute_trajectory_runtimes,
+            sampling_runtimes=self._sampling_runtimes,
+            selection_runtimes=self._selection_runtimes,
+        )
+        if clear_stats:
+            self._compute_trajectory_runtimes = []
+            self._sampling_runtimes = []
+            self._selection_runtimes = []
+        return report
+
+
+def _elapsed(start: float, output: torch.Tensor) -> float:
+    """Seconds since start, after waiting for the GPU work that produced output (CUDA kernels run asynchronously)."""
+    if output.is_cuda:
+        torch.cuda.synchronize(output.device)
+    return time.perf_counter() - start
