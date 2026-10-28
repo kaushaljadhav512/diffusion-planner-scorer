@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 
+from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
 from nuplan.planning.simulation.trajectory.trajectory_sampling import TrajectorySampling
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
@@ -19,6 +20,9 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
     With K=1 (or FirstSample) it behaves like DiffusionPlanner.
     """
 
+    # nuPlan's planner builder then passes the scenario; only OracleSelector reads it (logged future)
+    requires_scenario: bool = True
+
     def __init__(
             self,
             config: Config,
@@ -35,9 +39,12 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
 
             enable_ema: bool = True,
             device: str = "cpu",
+
+            scenario: Optional[AbstractScenario] = None,
         ):
         super().__init__(config, ckpt_path, past_trajectory_sampling, future_trajectory_sampling, enable_ema, device)
 
+        self._scenario = scenario
         self._selector = selector
         self._K = K
         self._noise_scale = noise_scale
@@ -69,7 +76,8 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         inputs = self.observation_normalizer(inputs)
         candidates = sample_candidates(self._planner, inputs, self._K, self._noise_scale, self._steps) # [1, K, P, T, 4]
 
-        indices = self._selector.select(candidates, SelectionContext(inputs=inputs, planner_input=current_input))
+        context = SelectionContext(inputs=inputs, planner_input=current_input, scenario=self._scenario)
+        indices = self._selector.select(candidates, context)
         outputs = {"prediction": gather_selected(candidates, indices)} # [1, P, T, 4]
 
         trajectory = InterpolatedTrajectory(

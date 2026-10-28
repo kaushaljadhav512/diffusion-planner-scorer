@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Dict, Optional
 import torch
 
 if TYPE_CHECKING:
+    from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
     from nuplan.planning.simulation.planner.abstract_planner import PlannerInitialization, PlannerInput
 
 
@@ -15,9 +16,11 @@ class SelectionContext:
 
         inputs:         normalized model inputs, each [B, ...] (learned selector)
         planner_input:  nuPlan PlannerInput of the current step (PDM / oracle selectors)
+        scenario:       the nuPlan scenario, i.e. the logged future (oracle selector only)
     """
     inputs: Optional[Dict[str, torch.Tensor]] = None
     planner_input: Optional["PlannerInput"] = None
+    scenario: Optional["AbstractScenario"] = None
 
 
 class AbstractSelector(ABC):
@@ -93,6 +96,24 @@ class PDMSelector(AbstractSelector):
     def last_metrics(self):
         """Per-metric PDM scores of the last select() call, see PDMCandidateScorer.last_metrics."""
         return self._scorer.last_metrics()
+
+
+class OracleSelector(PDMSelector):
+    """
+    Upper bound for the headroom run: PDMSelector, but the other agents follow their logged futures instead of
+    constant-velocity forecasts. Non-reactive simulation only (in reactive simulation agents leave the log).
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40):
+        from diffusion_planner.scorer.pdm_scoring import PDMOracleCandidateScorer
+
+        self._scorer = PDMOracleCandidateScorer(map_radius=map_radius, proposal_poses=proposal_poses)
+        self.last_scores = None
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        assert context.scenario is not None, "OracleSelector needs the scenario (logged future)"
+        self._scorer.scenario = context.scenario
+        return super().select(candidates, context)
 
 
 def gather_selected(candidates: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
