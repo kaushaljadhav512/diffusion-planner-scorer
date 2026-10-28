@@ -1,8 +1,9 @@
 """Measure how diverse Diffusion Planner's K samples are (task 1.4).
 
-Caches ~100 nuPlan mini scenes with DP's DataProcessor (first run only), then draws K ego plans per
-scene with diffusion_planner.scorer.sampling.sample_candidates at several initial-noise scales and
-reports, averaged over scenes (ego frame, metres):
+Caches ~100 random nuPlan scenes (test split by default, --data_path for another, e.g. mini) with DP's
+DataProcessor (first run only), then draws K ego plans per scene with
+diffusion_planner.scorer.sampling.sample_candidates at several initial-noise scales and reports,
+averaged over scenes (ego frame, metres):
 
     endpoint_spread   RMS distance of the K endpoints (t = 8 s) from their mean
     lon_std, lat_std  std of the endpoints along / across the ego heading
@@ -52,7 +53,7 @@ def load_model(args_file, ckpt_path, device):
 
 
 def build_cache(config, data_path, map_path, cache_dir, num_scenes, seed):
-    """Process num_scenes random mini scenarios into DP's npz format (one file per scenario)."""
+    """Process num_scenes random scenarios of data_path into DP's npz format (one file per scenario)."""
     from nuplan.planning.scenario_builder.nuplan_db.nuplan_scenario_builder import NuPlanScenarioBuilder
     from nuplan.planning.scenario_builder.scenario_filter import ScenarioFilter
     from nuplan.planning.utils.multithreading.worker_parallel import SingleMachineParallelExecutor
@@ -72,7 +73,7 @@ def build_cache(config, data_path, map_path, cache_dir, num_scenes, seed):
     )
     worker = SingleMachineParallelExecutor(use_process_pool=True)
     scenarios = builder.get_scenarios(scenario_filter, worker)
-    print(f"[cache] processing {len(scenarios)} mini scenarios into {cache_dir}")
+    print(f"[cache] processing {len(scenarios)} scenarios of {data_path} into {cache_dir}")
 
     config.save_path = cache_dir
     DataProcessor(config).work(scenarios)
@@ -132,9 +133,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--args_file", default=str(ROOT / "checkpoints" / "args.json"))
     parser.add_argument("--ckpt", default=str(ROOT / "checkpoints" / "model.pth"))
-    parser.add_argument("--data_path", default=os.path.join(NUPLAN_DATA_ROOT, "nuplan-v1.1", "mini"))
+    parser.add_argument("--data_path", default=os.path.join(NUPLAN_DATA_ROOT, "nuplan-v1.1", "test"),
+                        help="dir of nuPlan DBs to draw scenes from, e.g. .../nuplan-v1.1/mini")
     parser.add_argument("--map_path", default=os.environ.get("NUPLAN_MAPS_ROOT", os.path.join(NUPLAN_DATA_ROOT, "maps")))
-    parser.add_argument("--cache_dir", default=os.path.join(NUPLAN_HOME, "cache", "mini_diversity"))
+    parser.add_argument("--cache_dir", default=None, help="default: $NUPLAN_HOME/cache/<data_path name>_diversity")
     parser.add_argument("--num_scenes", type=int, default=100)
     parser.add_argument("--K", type=int, default=16)
     parser.add_argument("--noise_scales", type=float, nargs="+", default=[0.5, 1.0, 1.5])
@@ -145,6 +147,8 @@ def main():
                         help="writes <out>.csv (per scene) and <out>.md (summary table)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
+    split = os.path.basename(os.path.normpath(args.data_path))
+    args.cache_dir = args.cache_dir or os.path.join(NUPLAN_HOME, "cache", f"{split}_diversity")
 
     config, model = load_model(args.args_file, args.ckpt, args.device)
 
@@ -182,7 +186,7 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     per_scene.to_csv(f"{args.out}.csv", index=False)
     with open(f"{args.out}.md", "w") as f:
-        f.write(f"Ego-plan diversity, K={args.K}, steps={args.steps}, nuPlan mini, metres, mean over scenes\n\n")
+        f.write(f"Ego-plan diversity, K={args.K}, steps={args.steps}, nuPlan {split}, metres, mean over scenes\n\n")
         f.write(markdown_table(summary) + "\n")
     print(markdown_table(summary))
     print(f"[diversity] wrote {args.out}.csv and {args.out}.md")
