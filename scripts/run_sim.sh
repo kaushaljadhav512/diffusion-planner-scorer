@@ -5,7 +5,7 @@
 #     planner:   dp          Diffusion Planner, released checkpoint, no refinement
 #                dp_k        best-of-K Diffusion Planner (diffusion_planner/scorer), see K / SELECTOR / NOISE
 #                pdm_closed  PDM-Closed (rule-based reference)
-#     split:     val14 | test14-hard | test14-random
+#     split:     val14 | test14-hard | test14-random | test14-hard-100 (scripts/make_subset_filter.py)
 #     challenge: nr (non-reactive agents) | r (reactive agents)
 #
 # Env knobs:
