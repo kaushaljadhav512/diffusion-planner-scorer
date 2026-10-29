@@ -56,14 +56,32 @@ class Random(AbstractSelector):
     def __init__(self, seed: int = 0):
         self._seed = seed
         self._generator = torch.Generator().manual_seed(seed)
+        #self._generator = None
 
     def initialize(self, initialization: "PlannerInitialization") -> None:
+        #self._generator = None
         # Reseed per scenario so results do not depend on which scenarios a worker ran before
         self._generator.manual_seed(self._seed)
 
     def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        # if self._generator is None:
+        #     self._generator = torch.Generator().manual_seed(self._seed)
+            
         B, K = candidates.shape[:2]
         return torch.randint(0, K, (B,), generator=self._generator).to(candidates.device)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        generator = state.pop("_generator")
+        state["_generator_state"] = generator.get_state()
+        return state
+
+    def __setstate__(self, state):
+        state = state.copy()
+        generator_state = state.pop("_generator_state")
+        self.__dict__.update(state)
+        self._generator = torch.Generator()
+        self._generator.set_state(generator_state)
 
 
 class PDMSelector(AbstractSelector):
