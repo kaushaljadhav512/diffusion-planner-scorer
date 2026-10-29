@@ -85,7 +85,7 @@ def write_filter(source: dict, chosen: List[Tuple[str, str]], path: Path, header
     config["scenario_tokens"] = sorted(token for token, _ in chosen)
     with open(path, "w") as f:
         f.write(header)
-        yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
+        yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False, default_style='"')
 
 
 def main():
