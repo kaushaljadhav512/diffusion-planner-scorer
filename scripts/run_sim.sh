@@ -19,7 +19,8 @@
 #   K=N            candidates per step (default 16)
 #   SELECTOR=s     first | random | pdm | oracle (default first; oracle = PDM with logged futures, nr only)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
-#   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>] so different settings don't overwrite
+#   SEED=n         torch seed, reset per scenario (default 0)
+#   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>][_seed<SEED>] so different settings don't overwrite
 #   each other in summarize_results.py.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../setup/config.env"
@@ -68,6 +69,7 @@ case "$PLANNER" in
     K="${K:-16}"
     SELECTOR="${SELECTOR:-first}"
     NOISE="${NOISE:-0.5}"
+    SEED="${SEED:-0}"
     case "$SELECTOR" in
       first)  SELECTOR_TARGET=diffusion_planner.scorer.selectors.FirstSample ;;
       random) SELECTOR_TARGET=diffusion_planner.scorer.selectors.Random ;;
@@ -79,6 +81,7 @@ case "$PLANNER" in
     esac
     NAME="dp_k${K}_${SELECTOR}"
     [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE}"
+    [ "$SEED" = "0" ] || NAME="${NAME}_seed${SEED}"
     PLANNER_ARGS=(
       planner=diffusion_planner_k
       planner.diffusion_planner_k.config.args_file="$DP_ROOT/checkpoints/args.json"
@@ -86,6 +89,7 @@ case "$PLANNER" in
       planner.diffusion_planner_k.device="$DP_DEVICE"
       planner.diffusion_planner_k.K="$K"
       planner.diffusion_planner_k.noise_scale="$NOISE"
+      planner.diffusion_planner_k.seed="$SEED"
       planner.diffusion_planner_k.selector._target_="$SELECTOR_TARGET"
       "${GPU_ARGS[@]}"
     )

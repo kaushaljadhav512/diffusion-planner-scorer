@@ -57,6 +57,35 @@ def test_gain_over_first_matches_k_noise_split_challenge():
     assert pd.isna(gains[4]) and gains[5:7] == [0.0, 4.0] and pd.isna(gains[7])
 
 
+def test_gain_over_first_matches_seed():
+    df = pd.DataFrame([
+        ("dp_k16_first", "sub", "nr", 70.0), ("dp_k16_oracle", "sub", "nr", 72.0),
+        ("dp_k16_first_seed1", "sub", "nr", 68.0), ("dp_k16_oracle_seed1", "sub", "nr", 71.0),
+        ("dp_k16_first_noise1.0_seed2", "sub", "nr", 65.0), ("dp_k16_oracle_noise1.0_seed2", "sub", "nr", 69.0),
+        ("dp_k16_oracle_seed3", "sub", "nr", 75.0),  # no seed-3 FirstSample run
+    ], columns=["planner", "split", "challenge", "CLS"])
+
+    gains = sr.gain_over_first(df).tolist()
+
+    assert gains[:6] == [0.0, 2.0, 0.0, 3.0, 0.0, 4.0] and pd.isna(gains[6])
+
+
+def test_over_seeds_groups_seeds_of_one_config():
+    df = pd.DataFrame([
+        ("dp_k16_first", "sub", "nr", 70.0), ("dp_k16_first_seed1", "sub", "nr", 68.0),
+        ("dp_k16_oracle", "sub", "nr", 72.0), ("dp_k16_oracle_seed1", "sub", "nr", 71.0),
+        ("dp_k16_oracle_noise1.0", "sub", "nr", 74.0), ("dp", "sub", "nr", 69.0),
+    ], columns=["planner", "split", "challenge", "CLS"])
+    df["vs_first"] = sr.gain_over_first(df)
+
+    out = sr.over_seeds(df).set_index("config")
+
+    assert set(out.index) == {"dp_k16_first", "dp_k16_oracle", "dp_k16_oracle_noise1.0"}
+    assert out.loc["dp_k16_oracle", "seeds"] == 2 and out.loc["dp_k16_oracle", "CLS_mean"] == pytest.approx(71.5)
+    assert out.loc["dp_k16_oracle", "vs_first_mean"] == pytest.approx(2.5)
+    assert out.loc["dp_k16_first", "CLS_std"] == pytest.approx(2 ** 0.5)
+
+
 def test_cli_split_filter_and_csv(tmp_path):
     rt = {"compute_trajectory_runtimes_mean": 0.2, "sampling_runtimes_mean": 0.1, "selection_runtimes_mean": 0.05}
     _run(tmp_path, "dp_k16_first", "sub_smoke5", "closed_loop_nonreactive_agents", 70.0, rt)

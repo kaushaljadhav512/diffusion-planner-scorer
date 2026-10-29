@@ -9,9 +9,11 @@ final CLS score plus the per-metric averages, with the paper's numbers alongside
     python scripts/summarize_results.py --by-type       # also break scores down by scenario type
     python scripts/summarize_results.py --csv out.csv
     python scripts/summarize_results.py --split test14-hard-100   # only that split (the headroom table)
+    python scripts/summarize_results.py --split test14-hard-100 --seeds-csv seeds.csv   # also mean / std over seeds
 
-Best-of-K runs (dp_k<K>_<selector>[_noise<f>]) also get the gain over FirstSample at the same K / noise, and the
-per-step sampling / selection time that the planner reports to nuPlan (<run>/runner_report.parquet).
+Best-of-K runs (dp_k<K>_<selector>[_noise<f>][_seed<n>]) also get the gain over FirstSample at the same K / noise /
+seed, and the per-step sampling / selection time that the planner reports to nuPlan (<run>/runner_report.parquet).
+Configurations run with several seeds are also averaged: mean and std of CLS and of the gain over FirstSample.
 """
 import argparse
 import os
@@ -41,7 +43,7 @@ RUNTIMES = {
     "sample_ms": "sampling_runtimes_mean",   # dp_k only
     "select_ms": "selection_runtimes_mean",  # dp_k only
 }
-DP_K_RUN = re.compile(r"^(dp_k\d+)_([a-z]+)(_noise[\d.]+)?$")  # dp_k<K>_<selector>[_noise<f>], see run_sim.sh
+DP_K_RUN = re.compile(r"^(dp_k\d+)_([a-z]+)(_noise[\d.]+)?(_seed\d+)?$")  # dp_k<K>_<selector>[_noise<f>][_seed<n>], see run_sim.sh
 
 
 def parse_run(parquet: Path):
@@ -77,14 +79,23 @@ def parse_runner_report(path: Path):
 
 
 def gain_over_first(df: pd.DataFrame) -> pd.Series:
-    """CLS minus the CLS of dp_k<K>_first[_noise] on the same split and challenge (NaN when not a dp_k run or missing)."""
+    """CLS minus the CLS of dp_k<K>_first[_noise][_seed] on the same split and challenge (NaN when not a dp_k run or missing)."""
     cls = {(p, s, c): v for p, s, c, v in zip(df.planner, df.split, df.challenge, df.CLS)}
     gains = []
     for p, s, c, v in zip(df.planner, df.split, df.challenge, df.CLS):
         m = DP_K_RUN.match(p)
-        first = cls.get((f"{m.group(1)}_first{m.group(3) or ''}", s, c)) if m else None
+        first = cls.get((f"{m.group(1)}_first{m.group(3) or ''}{m.group(4) or ''}", s, c)) if m else None
         gains.append(v - first if first is not None else float("nan"))
     return pd.Series(gains, index=df.index)
+
+
+def over_seeds(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean / std over seeds of CLS and vs_first per dp_k configuration (the run name without _seed<n>)."""
+    runs = df[df.planner.map(lambda p: bool(DP_K_RUN.match(p)))]
+    out = runs.assign(config=runs.planner.str.replace(r"_seed\d+$", "", regex=True)).groupby(["config", "split", "challenge"]).agg(
+        seeds=("CLS", "size"), CLS_mean=("CLS", "mean"), CLS_std=("CLS", "std"),
+        vs_first_mean=("vs_first", "mean"), vs_first_std=("vs_first", "std"))
+    return out.reset_index()
 
 
 def main():
@@ -94,6 +105,7 @@ def main():
     ap.add_argument("--by-type", action="store_true")
     ap.add_argument("--split", help="only runs of this split (as named in the run path, e.g. test14-hard-100_smoke5)")
     ap.add_argument("--csv")
+    ap.add_argument("--seeds-csv", help="write the mean / std over seeds table here")
     args = ap.parse_args()
 
     files = sorted(Path(args.exp_root).rglob("aggregator_metric/*weighted_average_metrics*.parquet"))
@@ -134,6 +146,11 @@ def main():
         cols = ["planner", "split", "challenge", "n", "CLS", "vs_first"] + [c for c in ["failed", *RUNTIMES] if c in df]
         print(df[df["vs_first"].notna()][cols].round(2).to_string(index=False))
 
+    seeds = over_seeds(df)
+    if (seeds.seeds > 1).any():
+        print("\n=== Best-of-K over seeds: mean / std of CLS and gain over FirstSample ===")
+        print(seeds.round(2).to_string(index=False))
+
     if args.by_type and types:
         t = pd.concat(types)
         t = t[t.timestamp.isin(df.timestamp)]
@@ -143,6 +160,9 @@ def main():
     if args.csv:
         df.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+    if args.seeds_csv:
+        seeds.to_csv(args.seeds_csv, index=False)
+        print(f"wrote {args.seeds_csv}")
 
 
 if __name__ == "__main__":
