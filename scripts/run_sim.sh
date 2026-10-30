@@ -6,6 +6,7 @@
 #                dp_k        best-of-K Diffusion Planner (diffusion_planner/scorer), see K / SELECTOR / NOISE
 #                pdm_closed  PDM-Closed (rule-based reference)
 #     split:     val14 | test14-hard | test14-random | test14-hard-100 (scripts/make_subset_filter.py)
+#                train-labels-2k (scripts/make_train_filter.py; label generation)
 #     challenge: nr (non-reactive agents) | r (reactive agents)
 #
 # Env knobs:
@@ -17,11 +18,16 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random | pdm | oracle (default first; oracle = PDM with logged futures, nr only)
+#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label (default first)
+#                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
+#                    oracle: PDM with logged futures, nr only
+#                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
+#   LABEL_DIR=d    label output dir (default $NUPLAN_HOME/labels/<split>); LABEL_DRIVE=pdm | pdm_sl (default pdm_sl)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
+#   NOISE=a,b      mixed: candidate 0 at std a (a=0.5 is vanilla DP's own plan), candidates 1..K-1 at std b
 #   SEED=n         torch seed, reset per scenario (default 0)
-#   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>][_seed<SEED>] so different settings don't overwrite
-#   each other in summarize_results.py.
+#   Runs are stored as dp_k<K>_<selector>[_noise<NOISE>][_seed<SEED>] (mixed noise: _noise<a>-<b>) so different
+#   settings don't overwrite each other in summarize_results.py.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../setup/config.env"
 
@@ -35,8 +41,11 @@ case "$CH" in
   r)  CHALLENGE=closed_loop_reactive_agents ;;
   *)  echo "challenge must be nr or r"; exit 1 ;;
 esac
-# Val14 scenarios live in the val DBs (trainval/); Test14-* come from the test DBs.
-[ "$SPLIT" = "val14" ] && SCENARIO_BUILDER=nuplan || SCENARIO_BUILDER=nuplan_challenge
+# Val14 and train-* (scripts/make_train_filter.py) scenarios live in trainval/; Test14-* come from the test DBs.
+case "$SPLIT" in
+  val14|train-*) SCENARIO_BUILDER=nuplan ;;
+  *)             SCENARIO_BUILDER=nuplan_challenge ;;
+esac
 
 RAM_GB="$(awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo)"
 THREADS="${THREADS:-$(( RAM_GB / 3 < $(nproc) ? RAM_GB / 3 : $(nproc) ))}"
@@ -70,17 +79,30 @@ case "$PLANNER" in
     SELECTOR="${SELECTOR:-first}"
     NOISE="${NOISE:-0.5}"
     SEED="${SEED:-0}"
+    SELECTOR_ARGS=()
     case "$SELECTOR" in
       first)  SELECTOR_TARGET=diffusion_planner.scorer.selectors.FirstSample ;;
       random) SELECTOR_TARGET=diffusion_planner.scorer.selectors.Random ;;
       pdm)    SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMSelector ;;
+      pdm_sl) SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMSpeedLimitSelector ;;
       oracle)
         [ "$CH" = nr ] || { echo "SELECTOR=oracle needs nr: reactive agents leave the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSelector ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | oracle)"; exit 1 ;;
+      label)
+        [ "$CH" = nr ] || { echo "SELECTOR=label needs nr: the oracle labels use the logged future"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.labels.LabelRecorder
+        SELECTOR_ARGS+=(
+          "++planner.diffusion_planner_k.selector.out_dir=${LABEL_DIR:-$NUPLAN_HOME/labels/$SPLIT}"
+          "++planner.diffusion_planner_k.selector.drive=${LABEL_DRIVE:-pdm_sl}"
+        ) ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label)"; exit 1 ;;
+    esac
+    case "$NOISE" in
+      *,*) NOISE_FIRST="${NOISE%%,*}"; NOISE_REST="${NOISE#*,}" ;;
+      *)   NOISE_FIRST=null; NOISE_REST="$NOISE" ;;
     esac
     NAME="dp_k${K}_${SELECTOR}"
-    [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE}"
+    [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE/,/-}"
     [ "$SEED" = "0" ] || NAME="${NAME}_seed${SEED}"
     PLANNER_ARGS=(
       planner=diffusion_planner_k
@@ -88,9 +110,11 @@ case "$PLANNER" in
       planner.diffusion_planner_k.ckpt_path="$DP_ROOT/checkpoints/model.pth"
       planner.diffusion_planner_k.device="$DP_DEVICE"
       planner.diffusion_planner_k.K="$K"
-      planner.diffusion_planner_k.noise_scale="$NOISE"
+      planner.diffusion_planner_k.noise_scale="$NOISE_REST"
+      planner.diffusion_planner_k.noise_scale_first="$NOISE_FIRST"
       planner.diffusion_planner_k.seed="$SEED"
       planner.diffusion_planner_k.selector._target_="$SELECTOR_TARGET"
+      "${SELECTOR_ARGS[@]}"
       "${GPU_ARGS[@]}"
     )
     ;;

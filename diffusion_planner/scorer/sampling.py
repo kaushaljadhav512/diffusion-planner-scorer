@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Sequence, Union
 
 import torch
 
@@ -27,7 +27,7 @@ def sample_candidates(
         model: Diffusion_Planner,
         inputs: Dict[str, torch.Tensor],
         K: int,
-        noise_scale: float = 0.5,
+        noise_scale: Union[float, Sequence[float]] = 0.5,
         steps: int = 10,
     ) -> torch.Tensor:
     """
@@ -41,7 +41,8 @@ def sample_candidates(
         model: Diffusion_Planner in eval mode
         inputs: normalized model inputs (after observation_normalizer), each [B, ...]
         K: candidates per scene
-        noise_scale: std of the initial noise x_T on the future states (upstream: 0.5)
+        noise_scale: std of the initial noise x_T on the future states (upstream: 0.5); a sequence of K values
+                     gives each candidate its own std (e.g. candidate 0 at 0.5 = vanilla DP, the rest at 1.5)
         steps: DPM-Solver steps (upstream: 10)
 
     Returns:
@@ -74,8 +75,14 @@ def sample_candidates(
         route_lanes = inputs['route_lanes']
         neighbor_current_mask = inputs["neighbor_current_mask"]
 
-    # [B * K, P, (1 + V_future) * 4]; noise drawn on CPU like upstream so the K=1 RNG stream matches
-    xT = torch.cat([current_states[:, :, None], torch.randn(B * K, P, T, 4).to(current_states.device) * noise_scale], dim=2).reshape(B * K, P, -1)
+    scales = torch.as_tensor(noise_scale, dtype=torch.float32).reshape(-1)
+    assert len(scales) in (1, K), f"noise_scale needs 1 or K={K} values, got {len(scales)}"
+
+    # Noise drawn on CPU like upstream, candidate-major: the first B draws are candidate 0 of every scene, the same
+    # values a K=1 call (vanilla DP) draws at the same seed. For B=1 this is the same stream as a [B * K] draw.
+    noise = torch.randn(K, B, P, T, 4) * scales.expand(K)[:, None, None, None, None]
+    noise = noise.transpose(0, 1).reshape(B * K, P, T, 4).to(current_states.device) # row b * K + k
+    xT = torch.cat([current_states[:, :, None], noise], dim=2).reshape(B * K, P, -1) # [B * K, P, (1 + V_future) * 4]
 
     def initial_state_constraint(xt, t, step):
         xt = xt.reshape(B * K, P, -1, 4)

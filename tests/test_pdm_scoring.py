@@ -179,3 +179,94 @@ def test_oracle_selector_passes_scenario():
     scenario = object()
     assert selector.select(candidates, SelectionContext(planner_input=object(), scenario=scenario)).item() == 1
     assert selector._scorer.scenario is scenario
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Speed limit (task 2.15)
+
+from shapely.geometry import box
+from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+from tuplan_garage.planning.simulation.planner.pdm_planner.observation.pdm_occupancy_map import PDMOccupancyMap
+from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_enums import BBCoordsIndex, StateIndex
+
+from diffusion_planner.scorer.pdm_scoring import PDMCandidateScorer
+from diffusion_planner.scorer.selectors import PDMSpeedLimitSelector
+
+
+class _FakeMap:
+    """lane_a: 10 m/s; conn: a connector from lane_a (10) to lane_b (15); park: a carpark (no limit)."""
+
+    def __init__(self):
+        lane_a, lane_b = SimpleNamespace(speed_limit_mps=10.0), SimpleNamespace(speed_limit_mps=15.0)
+        self.objects = {
+            (SemanticMapLayer.LANE, "lane_a"): lane_a,
+            (SemanticMapLayer.LANE, "lane_b"): lane_b,
+            (SemanticMapLayer.LANE_CONNECTOR, "conn"): SimpleNamespace(incoming_edges=[lane_a], outgoing_edges=[lane_b]),
+        }
+        self.calls = 0
+
+    def get_map_object(self, token, layer):
+        self.calls += 1
+        return self.objects.get((layer, token))
+
+
+def _speed_limit_scorer(xs, speeds, H=40):
+    """Scorer whose last score() left K candidates standing at x = xs[k] (y = 0) with constant speed speeds[k]."""
+    scorer = PDMCandidateScorer()
+    K = len(xs)
+    states = np.zeros((K, H + 1, StateIndex.size()))
+    states[..., StateIndex.VELOCITY_X] = np.asarray(speeds, dtype=np.float64)[:, None]
+    coords = np.zeros((K, H + 1, len(BBCoordsIndex), 2))
+    coords[..., BBCoordsIndex.CENTER, 0] = np.asarray(xs, dtype=np.float64)[:, None]
+    scorer._scorer._states, scorer._scorer._ego_coords = states, coords
+    scorer._map_api = _FakeMap()
+    scorer._drivable_area_map = PDMOccupancyMap(
+        ["lane_a", "conn", "park"], [box(0, -2, 50, 2), box(50, -2, 100, 2), box(100, -2, 150, 2)])
+    return scorer
+
+
+def test_speed_limit_compliance():
+    scorer = _speed_limit_scorer(
+        xs=[25, 25, 75, 125, 500],      # lane_a, lane_a, connector, carpark, off the map
+        speeds=[8, 12, 12, 30, 30])
+
+    scores = scorer.speed_limit_compliance()
+
+    # 2 m/s over a 10 m/s limit for the whole horizon: 1 - 2 / 2.23; the connector takes its fastest lane (15)
+    np.testing.assert_allclose(scores, [1.0, 1 - 2 / 2.23, 1.0, 1.0, 1.0])
+
+    # Speed limits are looked up once per map object and scenario
+    calls = scorer._map_api.calls
+    scorer.speed_limit_compliance()
+    assert scorer._map_api.calls == calls
+
+
+def test_speed_limit_clipped_at_zero():
+    scorer = _speed_limit_scorer(xs=[25], speeds=[20])
+    np.testing.assert_allclose(scorer.speed_limit_compliance(), [0.0])
+
+
+class _FakeMetricScorer(_FakeScorer):
+    """PDM metrics where candidate 1 is faster (more progress) but 3 m/s over the limit."""
+
+    def last_metrics(self):
+        ones = np.ones(2)
+        return {"multi_metrics": np.stack([ones, ones, ones]),
+                "weighted_metrics": np.stack([np.array([0.8, 1.0]), ones, ones])}
+
+    def speed_limit_compliance(self):
+        return np.array([1.0, 0.0])
+
+
+def test_pdm_speed_limit_selector_prefers_compliant_plan():
+    candidates = torch.zeros(1, 2, 11, 80, 4)
+    scorer = _FakeMetricScorer([0.9, 1.0]) # PDM's own score: candidate 1
+
+    plain = _selector([0.9, 1.0])
+    assert plain.select(candidates, SelectionContext(planner_input=object())).item() == 1
+
+    selector = PDMSpeedLimitSelector.__new__(PDMSpeedLimitSelector)
+    selector._scorer = scorer
+    assert selector.select(candidates, SelectionContext(planner_input=object())).item() == 0
+    # CLS weights: (5 * 0.8 + 5 + 4 + 2) / 16 vs (5 + 5 + 0 + 2) / 16
+    np.testing.assert_allclose(selector.last_scores, [15 / 16, 12 / 16])

@@ -43,7 +43,8 @@ RUNTIMES = {
     "sample_ms": "sampling_runtimes_mean",   # dp_k only
     "select_ms": "selection_runtimes_mean",  # dp_k only
 }
-DP_K_RUN = re.compile(r"^(dp_k\d+)_([a-z]+)(_noise[\d.]+)?(_seed\d+)?$")  # dp_k<K>_<selector>[_noise<f>][_seed<n>], see run_sim.sh
+# dp_k<K>_<selector>[_noise<f>[-<f>]][_seed<n>], see run_sim.sh; selectors may contain "_" (pdm_sl)
+DP_K_RUN = re.compile(r"^(dp_k\d+)_([a-z]+(?:_[a-z]+)*?)(_noise[\d.]+(?:-[\d.]+)?)?(_seed\d+)?$")
 
 
 def parse_run(parquet: Path):

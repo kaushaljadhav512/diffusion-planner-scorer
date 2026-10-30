@@ -150,3 +150,37 @@ def test_steps(setup):
 
     candidates = sample_candidates(model, inputs, K=2, steps=5)
     assert candidates.shape == (B, 2, 1 + config.predicted_neighbor_num, config.future_len, 4)
+
+
+def test_mixed_noise_candidate0_matches_vanilla(setup):
+    """Task 2.1: with a per-candidate noise scale, candidate 0 at 0.5 is vanilla DP's plan at the same seed."""
+    config, model = setup
+    inputs = _scene_inputs(config)
+
+    torch.manual_seed(7)
+    with torch.no_grad():
+        reference = model(dict(inputs))[1]["prediction"] # [B, P, T, 4], upstream noise std 0.5
+
+    torch.manual_seed(7)
+    candidates = sample_candidates(model, inputs, K=4, noise_scale=[0.5, 1.5, 1.5, 1.5])
+
+    assert torch.allclose(candidates[:, 0], reference, atol=1e-4)
+    # The random-weight fallback model barely reacts to its noise, so only require a difference
+    assert (candidates[:, 1] - reference).abs().max() > (candidates[:, 0] - reference).abs().max()
+
+
+def test_mixed_noise_scales_apply_per_candidate(setup):
+    """Zero noise on some candidates makes exactly those equal to the deterministic plan."""
+    config, model = setup
+    inputs = _scene_inputs(config)
+
+    deterministic = sample_candidates(model, inputs, K=1, noise_scale=0.0)
+    candidates = sample_candidates(model, inputs, K=4, noise_scale=[0.0, 1.0, 0.0, 1.0])
+
+    for k in (0, 2):
+        assert torch.allclose(candidates[:, k], deterministic[:, 0], atol=1e-4)
+    for k in (1, 3):
+        assert (candidates[:, k] - deterministic[:, 0]).abs().max() > (candidates[:, 0] - deterministic[:, 0]).abs().max()
+
+    with pytest.raises(AssertionError):
+        sample_candidates(model, inputs, K=4, noise_scale=[0.5, 1.5])

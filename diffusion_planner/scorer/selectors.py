@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import torch
 
 if TYPE_CHECKING:
+    import numpy as np
     from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
     from nuplan.planning.simulation.planner.abstract_planner import PlannerInitialization, PlannerInput
 
@@ -17,10 +18,12 @@ class SelectionContext:
         inputs:         normalized model inputs, each [B, ...] (learned selector)
         planner_input:  nuPlan PlannerInput of the current step (PDM / oracle selectors)
         scenario:       the nuPlan scenario, i.e. the logged future (oracle selector only)
+        noise_scale:    initial-noise std of each of the K candidates (recorded with the labels)
     """
     inputs: Optional[Dict[str, torch.Tensor]] = None
     planner_input: Optional["PlannerInput"] = None
     scenario: Optional["AbstractScenario"] = None
+    noise_scale: Optional[List[float]] = None
 
 
 class AbstractSelector(ABC):
@@ -106,14 +109,32 @@ class PDMSelector(AbstractSelector):
         assert context.planner_input is not None, "PDMSelector needs the PlannerInput"
 
         ego_plans = candidates[0, :, 0].detach().cpu().numpy().astype("float64") # [K, T, 4]
-        self.last_scores = self._scorer.score(context.planner_input, ego_plans)  # [K]
+        self.last_scores = self._score(context.planner_input, ego_plans)         # [K]
 
         # np.argmax returns the first maximum, i.e. the lowest index on ties
         return torch.tensor([int(self.last_scores.argmax())], dtype=torch.long, device=candidates.device)
 
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        """[K] score of each ego plan ([K, T, 4] float64), higher is better."""
+        return self._scorer.score(planner_input, ego_plans)
+
     def last_metrics(self):
         """Per-metric PDM scores of the last select() call, see PDMCandidateScorer.last_metrics."""
         return self._scorer.last_metrics()
+
+
+class PDMSpeedLimitSelector(PDMSelector):
+    """
+    PDMSelector plus nuPlan's speed-limit metric, which PDM's score leaves out: the weighted metrics are combined with
+    the closed-loop score's weights (progress 5, TTC 5, speed limit 4, comfort 2) instead of PDM's (5, 5, 2). Week 1's
+    PDM-selected runs lost 2-3 points of speed-limit compliance (task 2.15).
+    """
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        return combined_score(from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance()))
 
 
 class OracleSelector(PDMSelector):

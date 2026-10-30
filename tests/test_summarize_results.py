@@ -101,3 +101,19 @@ def test_cli_split_filter_and_csv(tmp_path):
     assert set(table.index) == {"dp_k16_first", "dp_k16_oracle"}
     assert table.loc["dp_k16_oracle", "vs_first"] == pytest.approx(3.5)
     assert table.loc["dp_k16_oracle", "select_ms"] == pytest.approx(50)
+
+
+def test_run_names_with_mixed_noise_and_underscored_selector():
+    df = pd.DataFrame([
+        ("dp_k16_first_noise0.5-1.5", "sub", "nr", 70.0), ("dp_k16_pdm_sl_noise0.5-1.5", "sub", "nr", 73.0),
+        ("dp_k16_first_noise0.5-1.5_seed1", "sub", "nr", 69.0), ("dp_k16_pdm_sl_noise0.5-1.5_seed1", "sub", "nr", 70.0),
+        ("dp_k16_pdm_sl", "sub", "nr", 71.0), ("dp_k16_first", "sub", "nr", 70.5),
+    ], columns=["planner", "split", "challenge", "CLS"])
+
+    df["vs_first"] = sr.gain_over_first(df)
+    assert df.vs_first.tolist() == pytest.approx([0.0, 3.0, 0.0, 1.0, 0.5, 0.0])
+
+    m = sr.DP_K_RUN.match("dp_k16_pdm_sl_noise0.5-1.5_seed2")
+    assert m.groups() == ("dp_k16", "pdm_sl", "_noise0.5-1.5", "_seed2")
+    assert set(sr.over_seeds(df).config) == {"dp_k16_first_noise0.5-1.5", "dp_k16_pdm_sl_noise0.5-1.5",
+                                             "dp_k16_pdm_sl", "dp_k16_first"}

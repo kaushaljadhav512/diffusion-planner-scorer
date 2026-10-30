@@ -47,6 +47,7 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
             selector: AbstractSelector,
             K: int = 16,
             noise_scale: float = 0.5,
+            noise_scale_first: Optional[float] = None,
             steps: int = 10,
             seed: Optional[int] = 0,
 
@@ -60,7 +61,8 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         self._scenario = scenario
         self._selector = selector
         self._K = K
-        self._noise_scale = noise_scale
+        # Per-candidate noise std; noise_scale_first sets candidate 0's (0.5 keeps vanilla DP's own plan in the set)
+        self._noise_scale = [noise_scale] * K if noise_scale_first is None else [noise_scale_first] + [noise_scale] * (K - 1)
         self._steps = steps
         self._seed = seed
 
@@ -96,7 +98,9 @@ class MultiSampleDiffusionPlanner(DiffusionPlanner):
         self._sampling_runtimes.append(_elapsed(start, candidates))
 
         start = time.perf_counter()
-        context = SelectionContext(inputs=inputs, planner_input=current_input, scenario=self._scenario)
+        context = SelectionContext(
+            inputs=inputs, planner_input=current_input, scenario=self._scenario, noise_scale=self._noise_scale
+        )
         indices = self._selector.select(candidates, context)
         self._selection_runtimes.append(_elapsed(start, indices))
 

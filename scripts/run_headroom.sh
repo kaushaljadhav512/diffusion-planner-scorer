@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Headroom run (task 1.10): best-of-K Diffusion Planner with every selector on the fixed subset, then the table
 # (CLS, gain over FirstSample, per-step sampling / selection time) printed and written to results/.
-#   scripts/run_headroom.sh                                # K=16: nr first/random/pdm/oracle, r first/random/pdm
+#   scripts/run_headroom.sh                                # K=16: nr first/random/pdm/pdm_sl/oracle, r without oracle
 #   K=8 NOISE=1.0 scripts/run_headroom.sh                  # another K / noise (1.11 rerun)
+#   NOISE=0.5,1.5 scripts/run_headroom.sh                  # mixed: candidate 0 at 0.5 (vanilla), the rest at 1.5 (2.3)
 #   NOISE=1.0 SEED=1 scripts/run_headroom.sh               # another seed; the table also averages over seeds
 #   SMOKE=5 SELECTORS="first oracle" CHALLENGES=nr scripts/run_headroom.sh
 # Several hours at full size; run inside tmux. The subset filter comes from scripts/make_subset_filter.py.
@@ -11,7 +12,7 @@ HERE="$(dirname "${BASH_SOURCE[0]}")"
 source "$HERE/../setup/config.env"
 
 SPLIT="${SPLIT:-test14-hard-100}"
-SELECTORS="${SELECTORS:-first random pdm oracle}"  # first first: the others are compared against it
+SELECTORS="${SELECTORS:-first random pdm pdm_sl oracle}"  # first first: the others are compared against it
 CHALLENGES="${CHALLENGES:-nr r}"
 export K="${K:-16}" NOISE="${NOISE:-0.5}" SEED="${SEED:-0}"
 
@@ -22,7 +23,7 @@ mkdir -p "$NUPLAN_EXP_ROOT/logs"
 failed=()
 for c in $CHALLENGES; do for s in $SELECTORS; do
   [ "$s" = oracle ] && [ "$c" = r ] && continue  # logged futures are only exact without reactive agents
-  log="$NUPLAN_EXP_ROOT/logs/dp_k${K}_${s}_noise${NOISE}_seed${SEED}_${SPLIT}_${c}${SMOKE:+_smoke$SMOKE}_$(date +%m%d-%H%M).log"
+  log="$NUPLAN_EXP_ROOT/logs/dp_k${K}_${s}_noise${NOISE/,/-}_seed${SEED}_${SPLIT}_${c}${SMOKE:+_smoke$SMOKE}_$(date +%m%d-%H%M).log"
   echo "=== K=$K noise=$NOISE seed=$SEED $s / $SPLIT / $c  (log: $log)"
   start=$SECONDS
   if SELECTOR="$s" bash "$HERE/run_sim.sh" dp_k "$SPLIT" "$c" >"$log" 2>&1; then

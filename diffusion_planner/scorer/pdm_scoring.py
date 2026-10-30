@@ -1,3 +1,4 @@
+import warnings
 from typing import Dict, List
 
 import numpy as np
@@ -7,10 +8,10 @@ import shapely.creation
 from nuplan.common.actor_state.ego_state import EgoState
 from nuplan.common.actor_state.tracked_objects import TrackedObject
 from nuplan.common.maps.abstract_map_objects import LaneGraphEdgeMapObject
-from nuplan.common.maps.maps_datatypes import TrafficLightStatusData
+from nuplan.common.maps.maps_datatypes import SemanticMapLayer, TrafficLightStatusData
 from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
 from nuplan.planning.simulation.observation.observation_type import Observation
-from nuplan.planning.simulation.planner.abstract_planner import PlannerInput
+from nuplan.planning.simulation.planner.abstract_planner import PlannerInitialization, PlannerInput
 from nuplan.planning.simulation.trajectory.trajectory_sampling import TrajectorySampling
 
 from tuplan_garage.planning.simulation.planner.pdm_planner.observation.pdm_observation import PDMObservation
@@ -24,6 +25,8 @@ from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_array_repre
 )
 from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_enums import BBCoordsIndex, StateIndex
 from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_path import PDMPath
+
+from diffusion_planner.scorer.metrics import speed_limit_compliance
 
 
 def relative_to_global_poses(ego_state: EgoState, predictions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -64,10 +67,15 @@ class PDMCandidateScorer(PDMClosedPlanner):
             lateral_offsets=None,
             map_radius=map_radius,
         )
+        self._speed_limits: Dict[str, float] = {}
 
     @property
     def horizon_poses(self) -> int:
         return self._proposal_sampling.num_poses
+
+    def initialize(self, initialization: PlannerInitialization) -> None:
+        super().initialize(initialization)
+        self._speed_limits: Dict[str, float] = {} # map object id -> speed limit [m/s] (NaN: none), per scenario
 
     def _update_observation(self, ego_state: EgoState, current_input: PlannerInput) -> None:
         """Constant-velocity forecasts of the current detections (overridden by the oracle)."""
@@ -126,6 +134,51 @@ class PDMCandidateScorer(PDMClosedPlanner):
             "weighted_metrics": self._scorer._weighted_metrics.copy(), # [3, K] progress (normalized), ttc, comfort
             "progress_raw": self._scorer._progress_raw.copy(),         # [K] metres along the centerline
         }
+
+    def speed_limit_compliance(self) -> npt.NDArray[np.float64]:
+        """
+        nuPlan's speed_limit_compliance of each candidate of the last score() call, over the scored horizon after LQR
+        tracking. PDM's own score leaves this metric out. The limit at a pose is the highest limit of the drivable-area
+        lanes containing ego's center (lane connectors: the highest of their incoming and outgoing lanes, as nuPlan
+        does); poses outside any lane, or on lanes without a limit, count as no violation.
+
+        Returns:
+            scores: [K] in [0, 1]
+        """
+        states = self._scorer._states[:, 1:]                                  # [K, H, StateIndex.size()], future only
+        centers = self._scorer._ego_coords[:, 1:, BBCoordsIndex.CENTER]       # [K, H, 2]
+        speeds = np.hypot(states[..., StateIndex.VELOCITY_X], states[..., StateIndex.VELOCITY_Y])
+
+        point_limits = np.full(speeds.shape, np.nan)
+        tokens = self._drivable_area_map.tokens
+        if len(tokens):
+            limits = np.array([self._speed_limit(token) for token in tokens], dtype=np.float64) # [n_polygons]
+            inside = self._drivable_area_map.points_in_polygons(centers.reshape(-1, 2))         # [n_polygons, K * H]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning) # all-NaN columns: points outside every lane
+                point_limits = np.nanmax(np.where(inside, limits[:, None], np.nan), axis=0).reshape(speeds.shape)
+
+        return speed_limit_compliance(speeds, point_limits)
+
+    def _speed_limit(self, token: str) -> float:
+        """Speed limit [m/s] of a drivable-area map object, NaN if it has none (carparks, missing map data)."""
+        if token not in self._speed_limits:
+            self._speed_limits[token] = _lookup_speed_limit(self._map_api, token)
+        return self._speed_limits[token]
+
+
+def _lookup_speed_limit(map_api, token: str) -> float:
+    lane = map_api.get_map_object(token, SemanticMapLayer.LANE)
+    if lane is not None:
+        limits = [lane.speed_limit_mps]
+    else:
+        connector = map_api.get_map_object(token, SemanticMapLayer.LANE_CONNECTOR)
+        if connector is None:
+            return float("nan") # carpark area
+        # As nuPlan's SpeedLimitViolationExtractor for lane connectors
+        limits = [edge.speed_limit_mps for edge in connector.incoming_edges + connector.outgoing_edges]
+    # nuPlan skips the check unless every limit is known (and non-zero)
+    return float(max(limits)) if limits and all(limits) else float("nan")
 
 
 class PDMLogFutureObservation(PDMObservation):

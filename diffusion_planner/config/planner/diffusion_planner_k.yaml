@@ -31,6 +31,7 @@ diffusion_planner_k:
     _convert_: "all"
   K: 16
   noise_scale: 0.5   # std of the initial diffusion noise (upstream: 0.5)
+  noise_scale_first: null # candidate 0's std if set (e.g. 0.5 with noise_scale 1.5: vanilla's plan plus diverse ones)
   steps: 10          # DPM-Solver steps (upstream: 10)
   seed: 0            # torch seed, reset per scenario; null to leave unseeded
 
