@@ -1,0 +1,3 @@
+config,split,challenge,seeds,CLS_mean,CLS_std,vs_first_mean,vs_first_std
+dp_k16_first,test14-hard-100_smoke5,nr,2,84.37977735126984,16.704626883336864,0.0,0.0
+dp_k16_oracle,test14-hard-100_smoke5,nr,1,84.45741219085114,,-11.734320106817293,
