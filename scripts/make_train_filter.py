@@ -12,8 +12,10 @@ Needs only the DBs (no nuplan-devkit install, no GPU).
 Within a log, scenarios of the same type are kept at least --min-gap-s apart (nuPlan's filter drops same-type
 scenarios closer than Test14-hard's timestamp_threshold_s=15 anyway) and at most --max-per-log-type of them are
 picked, so the labels cover many logs. Tags too close to the start or end of their log are skipped: a scenario needs
-2 s of history and 15 s of future. As in make_subset_filter.py, only tokens with a single listed tag are picked, so
-the written filter yields exactly --n scenarios.
+2 s of history and 15 s of future. Tags nuPlan's scenario builder would drop are skipped too: those outside its valid
+scenes (the first and last two of a log) or in a scene without a mission goal. As in make_subset_filter.py, only tokens
+with a single listed tag are picked. The builder's timestamp filter also compares scenarios across logs, so it can
+still drop a few of the --n.
 """
 import argparse
 import os
@@ -47,8 +49,18 @@ def train_logs(splitter: Path) -> Set[str]:
 
 def read_tags(db_files: List[Path], types: Set[str]) -> List[Tag]:
     """Tags of the listed types that leave HISTORY_S before and FUTURE_S after them in their log (one DB = one log)."""
-    query = ("SELECT st.lidar_pc_token, st.type, lp.timestamp FROM scenario_tag st "
-             "JOIN lidar_pc lp ON lp.token = st.lidar_pc_token")
+    # Same scene conditions as nuPlan's get_scenarios_from_db with remove_invalid_goals=True
+    query = """
+        WITH ordered AS (SELECT token, ROW_NUMBER() OVER (ORDER BY name ASC) AS row_num FROM scene),
+             valid_scenes AS (SELECT token FROM ordered
+                              WHERE row_num >= 3 AND row_num < (SELECT COUNT(*) FROM scene) - 1)
+        SELECT st.lidar_pc_token, st.type, lp.timestamp
+        FROM scenario_tag st
+        JOIN lidar_pc lp ON lp.token = st.lidar_pc_token
+        JOIN valid_scenes vs ON vs.token = lp.scene_token
+        JOIN scene s ON s.token = lp.scene_token
+        JOIN ego_pose ep ON ep.token = s.goal_ego_pose_token
+    """
     tags = []
     for db in db_files:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)

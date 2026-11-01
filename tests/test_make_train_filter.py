@@ -21,17 +21,31 @@ _spec.loader.exec_module(mtf)
 S = 1_000_000 # us
 
 
-def _db(path, tags, duration_s=100):
-    """tags: (token, type, time [s]) in a log covering [0, duration_s] s."""
+def _db(path, tags, duration_s=100, scenes=None):
+    """
+    tags: (token, type, time [s]) in a log covering [0, duration_s] s. They go in scene 2, a valid scene with a goal,
+    unless scenes maps their token to another scene (0-4, or 9: valid but without a goal).
+    """
+    scenes = scenes or {}
     con = sqlite3.connect(path)
-    con.execute("CREATE TABLE lidar_pc (token BLOB, timestamp INTEGER)")
+    con.execute("CREATE TABLE lidar_pc (token BLOB, timestamp INTEGER, scene_token BLOB)")
     con.execute("CREATE TABLE scenario_tag (token BLOB, lidar_pc_token BLOB, type TEXT)")
-    rows = [(b"start", 0), (b"end", duration_s * S)] + [(bytes.fromhex(token), t * S) for token, _, t in tags]
-    con.executemany("INSERT INTO lidar_pc VALUES (?, ?)", rows)
+    con.execute("CREATE TABLE scene (token BLOB, name TEXT, goal_ego_pose_token BLOB)")
+    con.execute("CREATE TABLE ego_pose (token BLOB)")
+    con.execute("INSERT INTO ego_pose VALUES (?)", (b"goal",))
+    con.executemany("INSERT INTO scene VALUES (?, ?, ?)",
+                    [(_scene(i), f"scene-{i}", b"goal") for i in range(5)] + [(_scene(9), "scene-2b", None)])
+    rows = [(b"start", 0, _scene(0)), (b"end", duration_s * S, _scene(4))]
+    rows += [(bytes.fromhex(token), t * S, _scene(scenes.get(token, 2))) for token, _, t in tags]
+    con.executemany("INSERT INTO lidar_pc VALUES (?, ?, ?)", rows)
     con.executemany("INSERT INTO scenario_tag VALUES (?, ?, ?)",
                     [(bytes(8), bytes.fromhex(token), type_) for token, type_, _ in tags])
     con.commit()
     con.close()
+
+
+def _scene(i):
+    return bytes([i])
 
 
 def _token(t):
@@ -44,6 +58,15 @@ def test_read_tags_skips_log_edges_and_unlisted_types(tmp_path):
     tags = mtf.read_tags([tmp_path / "log1.db"], {"turn"})
     # t=1 s has < 2 s of history, t=90 s < 15 s of future
     assert tags == [mtf.Tag(_token(10), "turn", "log1", 10 * S)]
+
+
+def test_read_tags_skips_scenes_the_builder_drops(tmp_path):
+    tags = [(_token(t), "turn", t) for t in (10, 20, 30, 40)]
+    # Sorted by name the 6 scenes are 0, 1, 2, 9, 3, 4; the first and last two are outside the builder's valid scenes
+    _db(tmp_path / "log1.db", tags, scenes={_token(10): 1, _token(20): 3, _token(30): 9})
+    kept = mtf.read_tags([tmp_path / "log1.db"], {"turn"})
+    # t=10, 20: outside the valid scenes; t=30: valid scene without a goal
+    assert [tag.token for tag in kept] == [_token(40)]
 
 
 def test_candidates_cap_gap_and_single_tag():
