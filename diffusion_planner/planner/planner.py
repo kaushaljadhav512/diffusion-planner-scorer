@@ -54,7 +54,9 @@ class DiffusionPlanner(AbstractPlanner):
         self._ema_enabled = enable_ema
         self._device = device
 
-        self._planner = Diffusion_Planner(config)
+        # The model is built in initialize(): nuPlan constructs one planner per scenario in the main process, so
+        # building it here costs ~29 MB x scenarios of RAM there
+        self._planner = None
 
         self.data_processor = DataProcessor(config)
         
@@ -78,6 +80,8 @@ class DiffusionPlanner(AbstractPlanner):
         """
         self._map_api = initialization.map_api
         self._route_roadblock_ids = initialization.route_roadblock_ids
+
+        self._planner = Diffusion_Planner(self._config)
 
         if self._ckpt_path is not None:
             # weights_only=False: torch >= 2.6 defaults to True (Blackwell GPUs need torch 2.7)

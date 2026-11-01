@@ -8,6 +8,9 @@ import pytest
 
 pytest.importorskip("nuplan")
 
+from unittest.mock import MagicMock
+
+from diffusion_planner.planner import planner as planner_module
 from diffusion_planner.scorer.planner import MultiSampleDiffusionPlanner, MultiSamplePlannerReport
 
 
@@ -32,3 +35,15 @@ def test_generate_planner_report_clears_per_scenario():
 
     empty = planner.generate_planner_report()
     assert empty.compute_trajectory_runtimes == empty.sampling_runtimes == empty.selection_runtimes == []
+
+
+def test_model_is_built_in_initialize_not_in_the_constructor(monkeypatch):
+    # nuPlan constructs one planner per scenario in the main process; a model in each runs it out of RAM
+    build = MagicMock()
+    monkeypatch.setattr(planner_module, "Diffusion_Planner", build)
+    monkeypatch.setattr(planner_module, "DataProcessor", MagicMock())
+    planner = planner_module.DiffusionPlanner(MagicMock(), None, MagicMock(), MagicMock())
+    build.assert_not_called()
+
+    planner.initialize(MagicMock())
+    build.assert_called_once()
