@@ -103,9 +103,12 @@ In the per-metric table, `pdm_sl` should recover the speed-limit points that `pd
 - [ ] `python scripts/label_stats.py $NUPLAN_HOME/labels/train-labels-2k --csv results/label_stats.csv` and
   commit the CSV (task 2.9). The key numbers: `informative`, `headroom`, `cv_regret` (how much PDM selection
   leaves on the table offline), and `cv_agreement`.
-- [ ] Overfit check (task 2.12):
+- [x] Overfit check (task 2.12):
   ```bash
   python -m diffusion_planner.scorer.train --data $NUPLAN_HOME/labels/train-labels-2k --overfit 100 \
-    --epochs 50 --out runs/overfit
+    --epochs 50 --lr 1e-3 --batch-size 16 --out runs/overfit
   ```
-  **Done when:** `regret verifier` falls to ~0 by the last epochs.
+  **Done when:** `regret verifier` falls to ~0 by the last epochs. **Result:** regret 0.0004, top-1 0.80 (random:
+  0.087 / 0.18) with the ranking loss (`--rank-weight 3 --rank-temperature 0.02`, now the defaults). BCE alone stalls at
+  regret ~0.019 (soft targets, so loss floor ~0.09). The old command (batch 64, lr 3e-4) gives only 2 steps per epoch
+  on 100 samples, so it reaches regret 0.044 in 50 epochs; use batch 16 for the overfit check.
