@@ -1,0 +1,33 @@
+[train] 53790 train / 5970 val samples, 1793 / 199 scenarios
+[train] trainable parameters: 1.46 M
+[epoch   0] loss 8.4089 | regret verifier 0.0443 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.786 pdm 0.931 first 0.271
+[epoch   1] loss 8.0853 | regret verifier 0.0430 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.820 pdm 0.931 first 0.271
+[epoch   2] loss 8.0243 | regret verifier 0.0414 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.819 pdm 0.931 first 0.271
+[epoch   3] loss 7.9795 | regret verifier 0.0374 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.816 pdm 0.931 first 0.271
+[epoch   4] loss 7.9476 | regret verifier 0.0410 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.826 pdm 0.931 first 0.271
+[epoch   5] loss 7.9280 | regret verifier 0.0401 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.834 pdm 0.931 first 0.271
+[epoch   6] loss 7.9103 | regret verifier 0.0381 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.844 pdm 0.931 first 0.271
+[epoch   7] loss 7.8976 | regret verifier 0.0399 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.835 pdm 0.931 first 0.271
+[epoch   8] loss 7.8801 | regret verifier 0.0407 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.817 pdm 0.931 first 0.271
+[epoch   9] loss 7.8683 | regret verifier 0.0402 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.838 pdm 0.931 first 0.271
+[epoch  10] loss 7.8531 | regret verifier 0.0356 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.824 pdm 0.931 first 0.271
+[epoch  11] loss 7.8417 | regret verifier 0.0394 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.840 pdm 0.931 first 0.271
+[epoch  12] loss 7.8343 | regret verifier 0.0366 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.835 pdm 0.931 first 0.271
+[epoch  13] loss 7.8217 | regret verifier 0.0383 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.844 pdm 0.931 first 0.271
+[epoch  14] loss 7.8093 | regret verifier 0.0371 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.840 pdm 0.931 first 0.271
+[epoch  15] loss 7.7988 | regret verifier 0.0400 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.843 pdm 0.931 first 0.271
+[epoch  16] loss 7.7882 | regret verifier 0.0376 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.845 pdm 0.931 first 0.271
+[epoch  17] loss 7.7778 | regret verifier 0.0398 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.838 pdm 0.931 first 0.271
+[epoch  18] loss 7.7665 | regret verifier 0.0353 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.841 pdm 0.931 first 0.271
+[epoch  19] loss 7.7594 | regret verifier 0.0333 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.845 pdm 0.931 first 0.271
+[epoch  20] loss 7.7502 | regret verifier 0.0364 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.842 pdm 0.931 first 0.271
+[epoch  21] loss 7.7392 | regret verifier 0.0367 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.843 pdm 0.931 first 0.271
+[epoch  22] loss 7.7334 | regret verifier 0.0381 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.846 pdm 0.931 first 0.271
+[epoch  23] loss 7.7264 | regret verifier 0.0359 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  24] loss 7.7206 | regret verifier 0.0354 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  25] loss 7.7151 | regret verifier 0.0357 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.848 pdm 0.931 first 0.271
+[epoch  26] loss 7.7105 | regret verifier 0.0342 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  27] loss 7.7088 | regret verifier 0.0348 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  28] loss 7.7059 | regret verifier 0.0343 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  29] loss 7.7053 | regret verifier 0.0342 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[train] best epoch 19: regret 0.0333, wrote runs/w3_ego

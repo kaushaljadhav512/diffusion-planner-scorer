@@ -1,0 +1,23 @@
+{
+  "epoch": 40,
+  "loss": 2.3190601212637767,
+  "seconds": 0.25097155570983887,
+  "n": 100,
+  "informative": 0.8799999952316284,
+  "all/verifier/top1": 0.800000011920929,
+  "all/verifier/regret": 0.0004965722328051925,
+  "all/first/top1": 0.23000000417232513,
+  "all/first/regret": 0.08569632470607758,
+  "all/pdm/top1": 1.0,
+  "all/pdm/regret": 9.53674295089968e-09,
+  "all/random/top1": 0.1756249964237213,
+  "all/random/regret": 0.08656671643257141,
+  "informative/verifier/top1": 0.7727272510528564,
+  "informative/verifier/regret": 0.0005642866599373519,
+  "informative/first/top1": 0.125,
+  "informative/first/regret": 0.09738218039274216,
+  "informative/pdm/top1": 1.0,
+  "informative/pdm/regret": 1.0837208463954084e-08,
+  "informative/random/top1": 0.06321022659540176,
+  "informative/random/regret": 0.09837127476930618
+}
