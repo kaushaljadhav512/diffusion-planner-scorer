@@ -1,0 +1,3 @@
+config,split,challenge,seeds,CLS_mean,CLS_std,vs_first_mean,vs_first_std
+dp_k16_pdm_sl_noise1.5,test14-hard,nr,3,75.89772779695396,0.200129657737135,,
+dp_k16_pdm_sl_noise1.5,test14-hard,r,3,71.95201577737957,0.5330903542316862,,
