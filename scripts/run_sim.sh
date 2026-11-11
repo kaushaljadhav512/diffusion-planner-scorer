@@ -18,9 +18,12 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label (default first)
+#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | oracle_sl | oracle_ep | label (default first)
 #                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
 #                    oracle: PDM with logged futures, nr only
+#                    oracle_sl: oracle with pdm_sl's score (the verifier's current training target), nr only
+#                    oracle_ep: oracle_sl with nuPlan's expert-relative progress + ego_is_making_progress, nr only;
+#                               per-step picks under both definitions go to ORACLE_STATS_DIR if set
 #                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
 #   LABEL_DIR=d    label output dir (default $NUPLAN_HOME/labels/<split>); LABEL_DRIVE=pdm | pdm_sl (default pdm_sl)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
@@ -88,6 +91,13 @@ case "$PLANNER" in
       oracle)
         [ "$CH" = nr ] || { echo "SELECTOR=oracle needs nr: reactive agents leave the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSelector ;;
+      oracle_sl)
+        [ "$CH" = nr ] || { echo "SELECTOR=oracle_sl needs nr: reactive agents leave the logged future"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSpeedLimitSelector ;;
+      oracle_ep)
+        [ "$CH" = nr ] || { echo "SELECTOR=oracle_ep needs nr: reactive agents leave the logged future"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleExpertProgressSelector
+        [ -z "${ORACLE_STATS_DIR:-}" ] || SELECTOR_ARGS+=("++planner.diffusion_planner_k.selector.stats_dir=$ORACLE_STATS_DIR") ;;
       label)
         [ "$CH" = nr ] || { echo "SELECTOR=label needs nr: the oracle labels use the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.labels.LabelRecorder
@@ -95,7 +105,7 @@ case "$PLANNER" in
           "++planner.diffusion_planner_k.selector.out_dir=${LABEL_DIR:-$NUPLAN_HOME/labels/$SPLIT}"
           "++planner.diffusion_planner_k.selector.drive=${LABEL_DRIVE:-pdm_sl}"
         ) ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label)"; exit 1 ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | oracle_sl | oracle_ep | label)"; exit 1 ;;
     esac
     case "$NOISE" in
       *,*) NOISE_FIRST="${NOISE%%,*}"; NOISE_REST="${NOISE#*,}" ;;

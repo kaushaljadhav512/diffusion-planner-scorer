@@ -270,3 +270,49 @@ def test_pdm_speed_limit_selector_prefers_compliant_plan():
     assert selector.select(candidates, SelectionContext(planner_input=object())).item() == 0
     # CLS weights: (5 * 0.8 + 5 + 4 + 2) / 16 vs (5 + 5 + 0 + 2) / 16
     np.testing.assert_allclose(selector.last_scores, [15 / 16, 12 / 16])
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Expert progress
+
+from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_path import PDMPath
+
+
+class _EgoLog:
+    """Logged ego driving along x at 5 m/s from x=10; n_future frames (0.1 s apart) exist after `iteration`."""
+
+    def __init__(self, n_future=40):
+        self.n_future = n_future
+
+    def _ego(self, k):
+        state = _ego_state(x=10.0 + 0.5 * k, y=0.0, heading=0.0)
+        return EgoState.build_from_rear_axle(
+            rear_axle_pose=state.rear_axle, rear_axle_velocity_2d=StateVector2D(5.0, 0.0),
+            rear_axle_acceleration_2d=StateVector2D(0.0, 0.0), tire_steering_angle=0.0,
+            time_point=TimePoint(int(k * 1e5)), vehicle_parameters=get_pacifica_parameters(),
+        )
+
+    def get_ego_state_at_iteration(self, iteration):
+        return self._ego(0)
+
+    def get_ego_future_trajectory(self, iteration, time_horizon, num_samples):
+        assert time_horizon == pytest.approx(4.0) and num_samples == 40
+        for k in range(1, min(num_samples, self.n_future) + 1):
+            yield self._ego(k)
+
+
+def _straight_centerline_scorer():
+    scorer = PDMCandidateScorer()
+    scorer._centerline = PDMPath([StateSE2(x, 0.0, 0.0) for x in np.arange(0.0, 100.0, 1.0)])
+    return scorer
+
+
+def test_expert_progress_along_centerline():
+    # 4 s at 5 m/s along the centerline
+    assert _straight_centerline_scorer().expert_progress(_EgoLog(), iteration=3) == pytest.approx(20.0)
+
+
+def test_expert_progress_scaled_at_log_end():
+    # Only 1 s logged (5 m): scaled to the 4 s horizon
+    assert _straight_centerline_scorer().expert_progress(_EgoLog(n_future=10), iteration=3) == pytest.approx(20.0)
+    assert _straight_centerline_scorer().expert_progress(_EgoLog(n_future=0), iteration=3) == 0.0

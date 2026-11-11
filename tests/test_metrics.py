@@ -39,3 +39,31 @@ def test_speed_limit_compliance_nan_means_no_limit():
     speeds = np.array([[12.0, 12.0], [12.0, 12.0]])
     limits = np.array([[10.0, np.nan], [np.nan, np.nan]])
     np.testing.assert_allclose(speed_limit_compliance(speeds, limits), [1 - 1 / 2.23, 1.0])
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# nuPlan's expert-relative progress
+
+from diffusion_planner.scorer.metrics import combined_score_expert, expert_progress_ratio, with_expert_progress
+
+
+def test_expert_progress_ratio_matches_nuplan():
+    # min(1, max(ego, 2) / max(expert, 2)); 0 below -2 m
+    np.testing.assert_allclose(expert_progress_ratio([0.0, 5.0, 10.0, 20.0, -3.0], 10.0), [0.2, 0.5, 1.0, 1.0, 0.0])
+    # Expert (nearly) stopped: anything up to 2 m scores 1, as nuPlan's threshold intends
+    np.testing.assert_allclose(expert_progress_ratio([0.0, 1.5, 6.0], 0.5), [1.0, 1.0, 1.0])
+
+
+def test_combined_score_expert():
+    metrics = np.ones((3, 7))
+    metrics[:, 3] = [1.0, 0.5, 0.05]  # PDM's normalized progress, ignored
+    progress = np.array([30.0, 10.0, 1.0])
+
+    expert_metrics, making = with_expert_progress(metrics, progress, expert_progress=20.0)
+    np.testing.assert_allclose(expert_metrics[:, 3], [1.0, 0.5, 0.1])
+    np.testing.assert_allclose(making, [1, 1, 0])      # 0.1 < 0.2: not making progress
+    assert metrics[2, 3] == 0.05                      # input untouched
+
+    np.testing.assert_allclose(combined_score_expert(metrics, progress, 20.0), [1.0, (5 * 0.5 + 11) / 16, 0.0])
+    # Faster than the human driver earns nothing extra: 30 m and 20 m both score 1
+    assert combined_score_expert(metrics, np.array([30.0, 20.0, 20.0]), 20.0)[0] == 1.0
