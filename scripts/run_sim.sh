@@ -18,10 +18,13 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label (default first)
+#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label | agree (default first)
 #                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
 #                    oracle: PDM with logged futures, nr only
 #                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
+#                    agree:  drives with pdm_sl and scores the candidates against forked reactive agents every
+#                            AGREE_EVERY steps (default 20) into AGREE_DIR (default $NUPLAN_HOME/agreement/<split>), r only
+#                            (diffusion_planner/scorer/agreement.py; summarize with scripts/agreement_report.py)
 #   LABEL_DIR=d    label output dir (default $NUPLAN_HOME/labels/<split>); LABEL_DRIVE=pdm | pdm_sl (default pdm_sl)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
 #   NOISE=a,b      mixed: candidate 0 at std a (a=0.5 is vanilla DP's own plan), candidates 1..K-1 at std b
@@ -88,6 +91,13 @@ case "$PLANNER" in
       oracle)
         [ "$CH" = nr ] || { echo "SELECTOR=oracle needs nr: reactive agents leave the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSelector ;;
+      agree)
+        [ "$CH" = r ] || { echo "SELECTOR=agree needs r: it forks the simulation's reactive agents"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.agreement.ReactiveAgreementRecorder
+        SELECTOR_ARGS+=(
+          "++planner.diffusion_planner_k.selector.out_dir=${AGREE_DIR:-$NUPLAN_HOME/agreement/$SPLIT}"
+          "++planner.diffusion_planner_k.selector.record_every=${AGREE_EVERY:-20}"
+        ) ;;
       label)
         [ "$CH" = nr ] || { echo "SELECTOR=label needs nr: the oracle labels use the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.labels.LabelRecorder
@@ -95,7 +105,7 @@ case "$PLANNER" in
           "++planner.diffusion_planner_k.selector.out_dir=${LABEL_DIR:-$NUPLAN_HOME/labels/$SPLIT}"
           "++planner.diffusion_planner_k.selector.drive=${LABEL_DRIVE:-pdm_sl}"
         ) ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label)"; exit 1 ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label | agree)"; exit 1 ;;
     esac
     case "$NOISE" in
       *,*) NOISE_FIRST="${NOISE%%,*}"; NOISE_REST="${NOISE#*,}" ;;
