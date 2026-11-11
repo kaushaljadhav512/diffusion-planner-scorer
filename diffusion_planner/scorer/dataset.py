@@ -41,6 +41,20 @@ def split_by_scenario(files: Sequence[Path], val_frac: float = 0.1, seed: int = 
     return [Path(f) for f in files if Path(f).parent.name not in val], [Path(f) for f in files if Path(f).parent.name in val]
 
 
+def subsample_scenarios(files: Sequence[Path], frac: float, seed: int = 0) -> List[Path]:
+    """
+    The samples of a random fraction of the scenarios (learning curve). For one seed the subsets are nested: a
+    smaller fraction's scenarios are a subset of a larger one's.
+
+    Returns:
+        files of round(frac * n_scenarios) scenarios, at least one
+    """
+    scenarios = sorted({Path(f).parent.name for f in files})
+    random.Random(seed).shuffle(scenarios)
+    keep = set(scenarios[:max(1, round(frac * len(scenarios)))])
+    return [Path(f) for f in files if Path(f).parent.name in keep]
+
+
 class LabelDataset(Dataset):
     """
     Items:
