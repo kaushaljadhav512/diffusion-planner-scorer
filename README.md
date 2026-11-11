@@ -1,6 +1,6 @@
 # Learning to Pick the Plan: A Learned Trajectory Scorer for Diffusion Planner
 
-CMU 11-785 course project. The project proposal is in [`docs/IDL_Project_proposal.pdf`](docs/IDL_Project_proposal.pdf).
+CMU 11-785 course project. The project proposal is in [`docs/IDL_Project_proposal.pdf`](docs/IDL_Project_proposal.pdf). The progress report (November 3, 2026) is in [`report/progress_report.pdf`](report/progress_report.pdf).
 
 This repository is built on [Diffusion-Planner](https://github.com/ZhengYinan-AIR/Diffusion-Planner) (Zheng et al., ICLR 2025), starting from upstream commit `a3a621f`. The upstream README is kept as [`UPSTREAM_README.md`](UPSTREAM_README.md). All credit for the base planner belongs to its authors; this repository is private and for coursework only.
 
@@ -133,7 +133,7 @@ scripts/summarize_results.py  results table with comparison against published sc
 scripts/plot_baseline.py      per-scenario-type CLS figure for the report
 docs/aws.md                   notes for running on AWS
 results/                      committed result tables
-report/                       midterm/final report sources and figures
+report/                       midterm/final report sources and figures, progress report PDF
 third_party/                  nuplan-devkit and tuplan_garage (created by bootstrap; not version-controlled)
 ```
 
