@@ -14,7 +14,9 @@ from torch.utils.data import DataLoader
 
 from diffusion_planner.model.diffusion_planner import Diffusion_Planner
 from diffusion_planner.scorer import train as train_module
-from diffusion_planner.scorer.dataset import INPUT_KEYS, LabelDataset, find_samples, split_by_scenario
+from diffusion_planner.scorer.dataset import (
+    INPUT_KEYS, LabelDataset, find_samples, split_by_scenario, subsample_scenarios,
+)
 from diffusion_planner.scorer.labels import LabelRecorder, load_sample, sample_dir, save_sample
 from diffusion_planner.scorer.metrics import METRICS
 from diffusion_planner.scorer.model import Verifier, scene_padding_mask
@@ -86,6 +88,18 @@ def test_split_by_scenario(tmp_path, config):
     assert {f.parent for f in train}.isdisjoint({f.parent for f in val})
     assert len({f.parent for f in val}) == 2
     assert split_by_scenario(files, val_frac=0.2, seed=0) == (train, val)
+
+
+def test_subsample_scenarios(tmp_path, config):
+    _write_dataset(tmp_path, config, n_scenarios=10, steps=2)
+    files = find_samples(tmp_path)
+
+    half = subsample_scenarios(files, 0.5, seed=1)
+    fifth = subsample_scenarios(files, 0.2, seed=1)
+    assert len({f.parent for f in half}) == 5 and len(half) == 10  # whole scenarios, all their samples
+    assert len({f.parent for f in fifth}) == 2
+    assert set(fifth) <= set(half)                                  # nested for one seed
+    assert len({f.parent for f in subsample_scenarios(files, 0.01)}) == 1
 
 
 def test_dataset_batches(tmp_path, config):

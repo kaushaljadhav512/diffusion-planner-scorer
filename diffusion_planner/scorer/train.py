@@ -6,6 +6,7 @@ Train the verifier on recorded labels (task 2.12).
     python -m diffusion_planner.scorer.train --data ... --no-scene         # trajectory-only ablation (3.3)
     python -m diffusion_planner.scorer.train --data ... --labels cv        # constant-velocity labels (3.2)
     python -m diffusion_planner.scorer.train --data ... --objective classify   # one score per candidate, no metrics
+    python -m diffusion_planner.scorer.train --data ... --train-frac 0.25 --split-seed 0   # learning curve point
 
 Loss: BCE per metric against the PDM labels (soft targets), optionally plus a listwise ranking loss on the combined
 score. Every epoch reports, on the held-out scenarios, against the oracle's combined score (the selection target):
@@ -29,7 +30,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario
+from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario, subsample_scenarios
 from diffusion_planner.scorer.metrics import METRICS, combined_score
 from diffusion_planner.scorer.model import Verifier
 
@@ -144,7 +145,11 @@ def run(args, config=None) -> Dict[str, float]:
         # Sanity check: train and evaluate on the same few samples
         train_files = val_files = files[:args.overfit]
     else:
-        train_files, val_files = split_by_scenario(files, args.val_frac, args.seed)
+        split_seed = args.seed if args.split_seed is None else args.split_seed
+        train_files, val_files = split_by_scenario(files, args.val_frac, split_seed)
+        if args.train_frac < 1.0:
+            # Learning curve: fewer training scenarios, same validation scenarios
+            train_files = subsample_scenarios(train_files, args.train_frac, args.seed)
     print(f"[train] {len(train_files)} train / {len(val_files)} val samples, "
           f"{len({f.parent for f in train_files})} / {len({f.parent for f in val_files})} scenarios")
 
@@ -225,6 +230,10 @@ def parse_args(argv=None):
                     help="metrics: 7 metric logits, BCE + ranking loss; classify: one score per candidate, "
                          "cross-entropy against the best candidate (see classify_loss)")
     ap.add_argument("--val-frac", type=float, default=0.1)
+    ap.add_argument("--split-seed", type=int, default=None,
+                    help="seed of the train/val split (default: --seed); fix it to compare runs on one val set")
+    ap.add_argument("--train-frac", type=float, default=1.0,
+                    help="learning curve: train on this fraction of the training scenarios (subset chosen by --seed)")
     ap.add_argument("--overfit", type=int, default=0, help="train and evaluate on the first N samples")
     ap.add_argument("--num-workers", type=int, default=min(8, os.cpu_count() or 1))
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
