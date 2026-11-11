@@ -69,6 +69,8 @@ Same, on the 79.5% of samples where the candidates' scores are not all tied:
 
 ## 5. Checkpoints
 
+To test them in closed-loop simulation, see `docs/verifier_closed_loop_testing.md`.
+
 `results/verifier/w3_oracle/best.pt` and `results/verifier/w3_ego/best.pt` (13 MB each) are the best-epoch weights
 behind the numbers above. They contain the full verifier, including DP's frozen encoders. Load with:
 
