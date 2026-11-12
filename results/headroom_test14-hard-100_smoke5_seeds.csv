@@ -2,4 +2,6 @@ config,split,challenge,seeds,CLS_mean,CLS_std,vs_first_mean,vs_first_std
 dp_k16_first,test14-hard-100_smoke5,nr,2,84.37977735126984,16.704626883336864,0.0,0.0
 dp_k16_first_noise0.5-1.5,test14-hard-100_smoke5,nr,1,72.56782240487124,,0.0,
 dp_k16_oracle,test14-hard-100_smoke5,nr,1,84.45741219085114,,-11.734320106817293,
+dp_k16_oracle_ep_noise1.5,test14-hard-100_smoke5,nr,1,92.02908154504554,,,
+dp_k16_oracle_sl_noise1.5,test14-hard-100_smoke5,nr,1,78.41136093972992,,,
 dp_k16_pdm_sl_noise0.5-1.5,test14-hard-100_smoke5,nr,1,76.24031282834791,,3.672490423476674,
