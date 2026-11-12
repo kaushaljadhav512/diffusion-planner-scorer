@@ -1,0 +1,23 @@
+[train] 53790 train / 5970 val samples, 1793 / 199 scenarios
+[train] trainable parameters: 1.46 M
+[epoch   0] loss 8.5595 | regret verifier 0.0444 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.779 pdm 0.931 first 0.271
+[epoch   1] loss 8.1105 | regret verifier 0.0423 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.816 pdm 0.931 first 0.271
+[epoch   2] loss 8.0072 | regret verifier 0.0404 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.821 pdm 0.931 first 0.271
+[epoch   3] loss 7.9634 | regret verifier 0.0422 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.826 pdm 0.931 first 0.271
+[epoch   4] loss 7.9389 | regret verifier 0.0407 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.832 pdm 0.931 first 0.271
+[epoch   5] loss 7.9177 | regret verifier 0.0409 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.833 pdm 0.931 first 0.271
+[epoch   6] loss 7.8986 | regret verifier 0.0386 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.836 pdm 0.931 first 0.271
+[epoch   7] loss 7.8843 | regret verifier 0.0378 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.841 pdm 0.931 first 0.271
+[epoch   8] loss 7.8690 | regret verifier 0.0379 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.840 pdm 0.931 first 0.271
+[epoch   9] loss 7.8563 | regret verifier 0.0381 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.844 pdm 0.931 first 0.271
+[epoch  10] loss 7.8432 | regret verifier 0.0365 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.842 pdm 0.931 first 0.271
+[epoch  11] loss 7.8315 | regret verifier 0.0366 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.847 pdm 0.931 first 0.271
+[epoch  12] loss 7.8215 | regret verifier 0.0394 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.845 pdm 0.931 first 0.271
+[epoch  13] loss 7.8125 | regret verifier 0.0372 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.851 pdm 0.931 first 0.271
+[epoch  14] loss 7.8033 | regret verifier 0.0362 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.852 pdm 0.931 first 0.271
+[epoch  15] loss 7.7945 | regret verifier 0.0360 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.851 pdm 0.931 first 0.271
+[epoch  16] loss 7.7898 | regret verifier 0.0355 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.851 pdm 0.931 first 0.271
+[epoch  17] loss 7.7848 | regret verifier 0.0364 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.852 pdm 0.931 first 0.271
+[epoch  18] loss 7.7809 | regret verifier 0.0363 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.852 pdm 0.931 first 0.271
+[epoch  19] loss 7.7800 | regret verifier 0.0362 pdm 0.0114 first 0.0564 random 0.0566 | top1 verifier 0.852 pdm 0.931 first 0.271
+[train] best epoch 16: regret 0.0355, wrote runs/learning_curve/frac1.0_seed0
