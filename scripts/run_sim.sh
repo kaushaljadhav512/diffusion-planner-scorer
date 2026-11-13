@@ -18,7 +18,8 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label (default first)
+#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label | verifier (default first)
+#                    verifier: learned verifier, checkpoint VERIFIER_CKPT (default results/verifier/w3_oracle/best.pt)
 #                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
 #                    oracle: PDM with logged futures, nr only
 #                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
@@ -95,7 +96,14 @@ case "$PLANNER" in
           "++planner.diffusion_planner_k.selector.out_dir=${LABEL_DIR:-$NUPLAN_HOME/labels/$SPLIT}"
           "++planner.diffusion_planner_k.selector.drive=${LABEL_DRIVE:-pdm_sl}"
         ) ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label)"; exit 1 ;;
+      verifier)
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.VerifierSelector
+        SELECTOR_ARGS+=(
+          "++planner.diffusion_planner_k.selector.ckpt_path=$DP_ROOT/${VERIFIER_CKPT:-results/verifier/w3_oracle/best.pt}"
+          "++planner.diffusion_planner_k.selector.args_file=$DP_ROOT/checkpoints/args.json"
+          "++planner.diffusion_planner_k.selector.device=$DP_DEVICE"
+        ) ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label | verifier)"; exit 1 ;;
     esac
     case "$NOISE" in
       *,*) NOISE_FIRST="${NOISE%%,*}"; NOISE_REST="${NOISE#*,}" ;;
