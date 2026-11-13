@@ -39,17 +39,22 @@ def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
 
 class Verifier(nn.Module):
 
-    def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True):
+    def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True,
+                 num_outputs: int = len(METRICS)):
         """
         Args:
             config: DP config (diffusion_planner.utils.config.Config or the training args)
             depth: transformer decoder layers over the candidates
             use_scene: False drops the encoder and route tokens (trajectory-only ablation, task 3.3); the ego-state
                        token stays
+            num_outputs: len(METRICS) = one logit per metric (combined with CLS's formula); 1 = a direct score per
+                         candidate with no metric heads (classifier, train.py --objective classify)
         """
         super().__init__()
         dim = config.hidden_dim
-        self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene}
+        assert num_outputs in (1, len(METRICS)), f"num_outputs must be 1 or {len(METRICS)}"
+        self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene,
+                        "num_outputs": num_outputs}
         self.use_scene = use_scene
 
         # Frozen DP modules (weights from the DP checkpoint, see from_dp_checkpoint)
@@ -73,7 +78,7 @@ class Verifier(nn.Module):
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, len(METRICS))
+        self.head = nn.Linear(dim, num_outputs)
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -114,7 +119,7 @@ class Verifier(nn.Module):
             encoding: optional precomputed DP encoder output, see encode
 
         Returns:
-            logits: [B, K, len(METRICS)]
+            logits: [B, K, num_outputs] (len(METRICS) metric logits, or 1 direct score)
         """
         memory, mask = self.encode(inputs, encoding)
         plans = (candidates - self.plan_mean) / self.plan_std
@@ -125,8 +130,12 @@ class Verifier(nn.Module):
 
     def score(self, inputs: Dict[str, torch.Tensor], candidates: torch.Tensor,
               encoding: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """[B, K] combined score (CLS formula) of the predicted metric probabilities."""
-        return combined_score(torch.sigmoid(self(inputs, candidates, encoding)))
+        """[B, K] higher is better: the combined score (CLS formula) of the predicted metric probabilities, or the
+        direct score of a classifier (num_outputs = 1)."""
+        out = self(inputs, candidates, encoding)
+        if out.shape[-1] == 1:
+            return out[..., 0]
+        return combined_score(torch.sigmoid(out))
 
     @classmethod
     def from_dp_checkpoint(cls, args_file: str, ckpt_path: Optional[str], device: str = "cpu", **kwargs) -> "Verifier":
