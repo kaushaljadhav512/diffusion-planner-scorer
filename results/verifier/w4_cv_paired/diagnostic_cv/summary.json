@@ -1,0 +1,20 @@
+{
+  "ckpt": "runs/w4_cv_paired/best.pt",
+  "labels": "cv",
+  "n": 5970,
+  "regret": {
+    "verifier": 0.03785769268870354,
+    "pdm_sl": 2.1964860486001214e-10
+  },
+  "top1": {
+    "verifier": 0.8368509212730318,
+    "pdm_sl": 1.0
+  },
+  "overlap": {
+    "both_hit": 0.8368509212730318,
+    "verifier_miss_pdm_hit": 0.16314907872696818,
+    "verifier_hit_pdm_miss": 0.0,
+    "both_miss": 0.0,
+    "regret_from_verifier_only_misses": 0.037857694641828935
+  }
+}
