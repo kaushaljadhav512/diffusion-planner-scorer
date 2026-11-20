@@ -4,6 +4,7 @@ labels with a randomly initialized DP config, no nuPlan data or checkpoint.
 
     pytest tests/test_verifier.py
 """
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -359,3 +360,87 @@ def test_label_stats(tmp_path, config):
     assert row["random_regret"] == pytest.approx(1 / 3)
     assert row["cv_top1"] == 0.0 and row["cv_agreement"] == 0.0 # PDM's view ties 0 and 2 and keeps 0
     assert row["pass_no_at_fault_collision"] == pytest.approx(2 / 3)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Dense analytic drivable-area labels
+
+
+def _straight_lanes(batch: int, lane_num: int, lane_len: int, centers_y=(0.0, 3.5), width=3.5) -> torch.Tensor:
+    """Normalized DP lane inputs: straight lanes along x from -20 m to 80 m at the given y, the rest padding."""
+    lanes = torch.zeros(batch, lane_num, lane_len, 12)
+    x = torch.linspace(-20.0, 80.0, lane_len)
+    for i, y in enumerate(centers_y):
+        lanes[:, i, :, 0] = (x - 10.0) / 20.0
+        lanes[:, i, :, 1] = y / 20.0
+        lanes[:, i, :, 2] = (x[1] - x[0]) / 20.0
+        lanes[:, i, :, 5] = width / 2 / 20.0
+        lanes[:, i, :, 7] = -width / 2 / 20.0
+    return lanes
+
+
+def test_corner_lane_distance_torch_matches_numpy():
+    from diffusion_planner.scorer.analytic_metrics import corner_lane_distance, corner_lane_distance_torch
+
+    g = torch.Generator().manual_seed(0)
+    lanes = _straight_lanes(3, 10, 20)
+    lanes[1, 1] = 0.0                                          # sample 1: one lane only
+    lanes[2] = lanes[2] + 0.01 * torch.randn(lanes[2].shape, generator=g) * (lanes[2] != 0)  # wobbly boundaries
+    plans = torch.zeros(3, 5, 80, 4)
+    t = torch.linspace(0.1, 8.0, 80)
+    plans[..., 0] = t * 8.0
+    plans[..., 1] = t[None, None] * torch.tensor([-1.0, -0.3, 0.0, 0.5, 1.5])[None, :, None]  # drift sideways
+    plans[..., 2] = 1.0
+
+    dist_t = corner_lane_distance_torch(lanes, plans, horizon=40)
+    assert dist_t.shape == (3, 5, 41, 4)
+    for b in range(3):
+        dist_np = corner_lane_distance(lanes[b].numpy(), plans[b].numpy(), horizon=40)
+        np.testing.assert_allclose(dist_t[b].numpy(), dist_np, atol=1e-3)
+    # The straight candidate stays inside; the hardest drift leaves the two-lane road
+    assert (dist_t[0, 2] == 0).all() and (dist_t[0, 4] > 0).any()
+
+
+def test_analytic_targets_and_loss():
+    from diffusion_planner.scorer.model import ANY_STEP, GEOM_OUTPUTS
+
+    lanes = _straight_lanes(2, 10, 20)
+    lanes[1] = 0.0                                             # a scene without lanes is skipped
+    plans = torch.zeros(2, 3, 80, 4)
+    plans[..., 0] = torch.linspace(0.8, 64.0, 80)
+    plans[:, 1, :, 1] = torch.linspace(0.0, 12.0, 80)          # leaves the road
+    plans[..., 2] = 1.0
+    targets = train_module.analytic_targets({"inputs": {"lanes": lanes}, "candidates": plans})
+    assert targets["valid"].tolist() == [True, False]
+    assert targets["step_off"][0, 0].sum() == 0 and targets["step_off"][0, 1, -1] == 1
+    assert (targets["margin"][0] <= train_module.MARGIN_CLIP).all()
+
+    aux = {"step_logits": torch.zeros(2, 3, 41, len(ANY_STEP) + 1, requires_grad=True),
+           "geom": torch.zeros(2, 3, 41, GEOM_OUTPUTS, requires_grad=True)}
+    assert train_module.analytic_loss({"step_logits": aux["step_logits"]}, targets) > 0   # step term alone
+    loss = train_module.analytic_loss(aux, targets, corner_weight=1.0, margin_weight=0.5)
+    loss.backward()
+    assert torch.isfinite(loss) and aux["step_logits"].grad[1].abs().sum() == 0   # invalid scene: no gradient
+
+
+def test_analytic_pretrain_then_finetune(tmp_path, config):
+    _write_dataset(tmp_path / "labels", config, n_scenarios=4, steps=4)
+    common = ["--data", str(tmp_path / "labels"), "--overfit", "16", "--arch", "timestep", "--batch-size", "8",
+              "--lr", "1e-3", "--num-workers", "0", "--device", "cpu"]
+
+    pre = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "pre"), "--analytic-only", "--epochs", "6"]), config=config)
+    log = [json.loads(line) for line in (tmp_path / "pre" / "log.jsonl").read_text().splitlines()]
+    assert log[-1]["analytic/loss"] < log[0]["analytic/loss"]
+    assert not torch.load(tmp_path / "pre" / "best.pt", weights_only=False)["hparams"]["geom_head"]
+
+    # Plain fine-tuning from the pretrained weights, and the multi-task variant with the optional geom_head terms
+    fine = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "fine"), "--epochs", "2", "--init-from", str(tmp_path / "pre" / "best.pt")]),
+        config=config)
+    assert "drivable/pair_acc" in fine and "analytic/loss" not in fine
+    multi = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "multi"), "--epochs", "2", "--analytic-weight", "0.3",
+                  "--corner-weight", "0.5", "--margin-weight", "0.5"]), config=config)
+    assert "analytic/loss" in multi
+    assert torch.load(tmp_path / "multi" / "best.pt", weights_only=False)["hparams"]["geom_head"]

@@ -16,6 +16,12 @@ labels' raw progress, weighted by --progress-weight. Every epoch reports, on the
     top1    fraction of samples where the pick is among the best candidates (ties count)
     regret  mean of (best combined score - combined score of the pick)
 
+Dense analytic drivable-area labels (timestep arch, --analytic-weight / --analytic-only): for every scored state
+and every corner of ego's box, the distance outside DP's input lane polygons (analytic_metrics), computed on the
+GPU per batch. They train the per-step drivable-area failure logit (the one the smooth max reads); optionally also a
+per-corner off-lane logit and the step's overshoot in metres (geom_head, --corner-weight / --margin-weight). --analytic-only trains on them alone (pretraining);
+--init-from then fine-tunes on the PDM labels.
+
 for the verifier, First (candidate 0), Random (expected value), and PDM (argmax of the constant-velocity labels,
 i.e. what PDMSpeedLimitSelector picks). "informative" restricts to samples whose candidates are not all tied.
 """
@@ -32,12 +38,18 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from diffusion_planner.scorer.analytic_metrics import corner_lane_distance_torch
 from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario, subsample_scenarios
 from diffusion_planner.scorer.metrics import METRICS, combined_score
-from diffusion_planner.scorer.model import ARCHS, PROGRESS_SCALE, Verifier
+from diffusion_planner.scorer.model import ANY_STEP, ARCHS, HORIZON, PROGRESS_SCALE, Verifier
 
 ROOT = Path(__file__).resolve().parents[2]
 TIE_TOLERANCE = 1e-6
+DRIVABLE = METRICS.index("drivable_area")
+DRIVABLE_STEP = ANY_STEP.index(DRIVABLE)     # column of the drivable-area failure logit in the per-step logits
+ANALYTIC_TOLERANCE = 0.2  # [m] a corner this close to a lane polygon counts as inside (closes the slivers between
+                          # rebuilt neighbouring lane polygons, see analytic_metrics.drivable_area_compliance)
+MARGIN_CLIP = 2.0         # [m] overshoot target clipped here
 
 
 def selection_metrics(true_scores: torch.Tensor, picks: torch.Tensor) -> Dict[str, float]:
@@ -102,25 +114,87 @@ def classify_loss(scores: torch.Tensor, metrics: torch.Tensor, temperature: floa
     return -(target * F.log_softmax(scores[informative], dim=1)).sum(dim=1).mean()
 
 
+def analytic_targets(batch) -> Dict[str, torch.Tensor]:
+    """Dense analytic drivable-area targets of a batch: corner_off [B, K, T, 4], step_off [B, K, T], margin [B, K, T],
+    valid [B] (scenes with at least one lane)."""
+    distance = corner_lane_distance_torch(batch["inputs"]["lanes"], batch["candidates"], horizon=HORIZON)
+    valid = torch.isfinite(distance).flatten(1).all(dim=1)
+    corner_off = (distance > ANALYTIC_TOLERANCE).float()
+    margin = distance.clamp(0.0, MARGIN_CLIP).amax(dim=-1)
+    return {"corner_off": corner_off, "step_off": corner_off.amax(dim=-1), "margin": margin, "valid": valid}
+
+
+def analytic_loss(aux: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor], corner_weight: float = 0.0,
+                  margin_weight: float = 0.0) -> torch.Tensor:
+    """
+    BCE of the per-step drivable-area failure logit (the one the smooth max reads) against "some corner off the lanes
+    at this step", over scenes with lanes. Optional geom_head terms: per-corner off-lane BCE (corner_weight) and smooth
+    L1 on the step's overshoot outside the lanes [m] (margin_weight; 0 for every on-lane step).
+    """
+    v = targets["valid"]
+    if not v.any():
+        return aux["step_logits"].sum() * 0.0
+    loss = F.binary_cross_entropy_with_logits(aux["step_logits"][v][..., DRIVABLE_STEP], targets["step_off"][v])
+    if corner_weight > 0:
+        loss = loss + corner_weight * F.binary_cross_entropy_with_logits(aux["geom"][v][..., :4],
+                                                                         targets["corner_off"][v])
+    if margin_weight > 0:
+        loss = loss + margin_weight * F.smooth_l1_loss(aux["geom"][v][..., 4], targets["margin"][v])
+    return loss
+
+
 def to_device(batch, device):
     if isinstance(batch, dict):
         return {k: to_device(v, device) for k, v in batch.items()}
     return batch.to(device) if isinstance(batch, torch.Tensor) else batch
 
 
+def pairwise_accuracy(predicted: torch.Tensor, labels: torch.Tensor) -> float:
+    """Among pairs (i, j) of one sample [N, K] with labels[i] > labels[j], the share with predicted[i] > predicted[j]
+    (ties count half), as in scripts/diagnose_verifier.py; NaN if there is no such pair."""
+    label_gt = (labels[:, :, None] - labels[:, None, :]) > TIE_TOLERANCE
+    diff = predicted[:, :, None] - predicted[:, None, :]
+    correct = (diff > 0).float() + 0.5 * (diff == 0).float()
+    n = label_gt.sum().item()
+    return float((correct * label_gt).sum().item() / n) if n else float("nan")
+
+
 @torch.no_grad()
-def evaluate(model: Verifier, loader: DataLoader, labels: str, device: str) -> Dict[str, float]:
+def evaluate(model: Verifier, loader: DataLoader, labels: str, device: str, analytic: bool = False,
+             corner_weight: float = 0.0, margin_weight: float = 0.0) -> Dict[str, float]:
     model.eval()
-    true, predicted, pdm = [], [], []
+    true, predicted, pdm, drivable_pred, drivable_label = [], [], [], [], []
+    step_hits = step_n = cand_hits = cand_n = 0
+    analytic_losses = []
     for batch in loader:
         batch = to_device(batch, device)
-        predicted.append(model.score(batch["inputs"], batch["candidates"]).cpu())
+        out, aux = model(batch["inputs"], batch["candidates"], return_aux=True)
+        predicted.append((out[..., 0] if out.shape[-1] == 1 else combined_score(torch.sigmoid(out))).cpu())
         true.append(combined_score(batch[f"metrics_{labels}"]).cpu())
         pdm.append(combined_score(batch["metrics_cv"]).cpu())
+        if out.shape[-1] > 1:
+            drivable_pred.append(torch.sigmoid(out[..., DRIVABLE]).cpu())
+            drivable_label.append(batch[f"metrics_{labels}"][..., DRIVABLE].cpu())
+        if analytic:
+            targets = analytic_targets(batch)
+            v = targets["valid"]
+            analytic_losses.append(analytic_loss(aux, targets, corner_weight, margin_weight).item())
+            step_logit = aux["step_logits"][v][..., DRIVABLE_STEP]
+            step_hits += ((step_logit > 0).float() == targets["step_off"][v]).sum().item()
+            step_n += step_logit.numel()
+            cand_off = targets["step_off"][v].amax(dim=-1)
+            cand_hits += ((out[v][..., DRIVABLE] < 0).float() == cand_off).sum().item()
+            cand_n += cand_off.numel()
     true, predicted, pdm = torch.cat(true), torch.cat(predicted), torch.cat(pdm)
+    extra = {}
+    if drivable_pred:
+        extra["drivable/pair_acc"] = pairwise_accuracy(torch.cat(drivable_pred), torch.cat(drivable_label))
+    if analytic:
+        extra.update({"analytic/loss": float(np.mean(analytic_losses)), "analytic/step_acc": step_hits / step_n,
+                      "analytic/candidate_acc": cand_hits / cand_n})
 
     informative = (true.max(dim=1).values - true.min(dim=1).values) > TIE_TOLERANCE
-    out = {"n": len(true), "informative": informative.float().mean().item()}
+    out = {"n": len(true), "informative": informative.float().mean().item(), **extra}
     picks = {"verifier": first_max(predicted), "first": torch.zeros(len(true), dtype=torch.long), "pdm": first_max(pdm)}
     for subset, rows in [("all", slice(None)), ("informative", informative)]:
         if subset == "informative" and not informative.any():
@@ -156,13 +230,24 @@ def run(args, config=None) -> Dict[str, float]:
           f"{len({f.parent for f in train_files})} / {len({f.parent for f in val_files})} scenarios")
 
     assert args.arch == "plan" or args.objective == "metrics", "--arch timestep needs --objective metrics"
+    analytic = args.analytic_only or args.analytic_weight > 0
+    init = torch.load(args.init_from, map_location="cpu", weights_only=False) if args.init_from else None
+    assert not analytic or args.arch == "timestep", "dense analytic labels need --arch timestep"
+    assert analytic or (args.corner_weight == 0 and args.margin_weight == 0), \
+        "--corner-weight / --margin-weight need --analytic-weight or --analytic-only"
     hparams = dict(depth=args.depth, num_heads=args.num_heads, dropout=0.0 if args.overfit else args.dropout,
                    use_scene=not args.no_scene, num_outputs=1 if args.objective == "classify" else len(METRICS),
-                   arch=args.arch)
+                   arch=args.arch, geom_head=(analytic and (args.corner_weight > 0 or args.margin_weight > 0))
+                   or bool(init and init["hparams"].get("geom_head")))
     if config is None:
         model = Verifier.from_dp_checkpoint(args.dp_args, args.dp_ckpt, device=args.device, **hparams)
     else:
         model = Verifier(config, **hparams).to(args.device)
+    if init is not None:
+        # Fine-tuning: every weight from a previous run (e.g. --analytic-only pretraining). Its geom_head is kept
+        # (unused without --analytic-weight) so the state dicts match
+        model.load_state_dict(init["state_dict"])
+        print(f"[train] initialized from {args.init_from} (epoch {init.get('epoch')})")
 
     loader_kwargs = dict(batch_size=args.batch_size, num_workers=args.num_workers,
                          pin_memory=args.device.startswith("cuda"))
@@ -182,13 +267,18 @@ def run(args, config=None) -> Dict[str, float]:
         for batch in train_loader:
             batch = to_device(batch, args.device)
             logits, aux = model(batch["inputs"], batch["candidates"], return_aux=True)
-            if args.objective == "classify":
+            if args.analytic_only:
+                loss = analytic_loss(aux, analytic_targets(batch), args.corner_weight, args.margin_weight)
+            elif args.objective == "classify":
                 loss = classify_loss(logits[..., 0], batch[f"metrics_{args.labels}"], args.rank_temperature)
             else:
                 loss = loss_fn(logits, batch[f"metrics_{args.labels}"], args.rank_weight, args.rank_temperature)
-            if "progress_raw" in aux and args.progress_weight > 0:
+            if "progress_raw" in aux and args.progress_weight > 0 and not args.analytic_only:
                 loss = loss + args.progress_weight * F.smooth_l1_loss(
                     aux["progress_raw"] / PROGRESS_SCALE, batch[f"progress_{args.labels}"] / PROGRESS_SCALE)
+            if args.analytic_weight > 0 and not args.analytic_only:
+                loss = loss + args.analytic_weight * analytic_loss(aux, analytic_targets(batch), args.corner_weight,
+                                                                   args.margin_weight)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -197,15 +287,21 @@ def run(args, config=None) -> Dict[str, float]:
             losses.append(loss.item())
 
         metrics = {"epoch": epoch, "loss": float(np.mean(losses)), "seconds": time.time() - start,
-                   **evaluate(model, val_loader, args.labels, args.device)}
+                   **evaluate(model, val_loader, args.labels, args.device, analytic, args.corner_weight,
+                              args.margin_weight)}
         log.write(json.dumps(metrics) + "\n")
         log.flush()
         print(f"[epoch {epoch:3d}] loss {metrics['loss']:.4f} | regret verifier {metrics['all/verifier/regret']:.4f} "
               f"pdm {metrics['all/pdm/regret']:.4f} first {metrics['all/first/regret']:.4f} "
               f"random {metrics['all/random/regret']:.4f} | top1 verifier {metrics['all/verifier/top1']:.3f} "
-              f"pdm {metrics['all/pdm/top1']:.3f} first {metrics['all/first/top1']:.3f}")
+              f"pdm {metrics['all/pdm/top1']:.3f} first {metrics['all/first/top1']:.3f}"
+              + (f" | drivable pair acc {metrics['drivable/pair_acc']:.3f}" if "drivable/pair_acc" in metrics else "")
+              + (f" | analytic loss {metrics['analytic/loss']:.4f} step acc {metrics['analytic/step_acc']:.4f}"
+                 f" cand acc {metrics['analytic/candidate_acc']:.4f}" if analytic else ""))
 
-        if best is None or metrics["all/verifier/regret"] < best["all/verifier/regret"]:
+        # Pretraining keeps the checkpoint with the lowest analytic loss; everything else the lowest regret
+        key = "analytic/loss" if args.analytic_only else "all/verifier/regret"
+        if best is None or metrics[key] < best[key]:
             best = metrics
             model.save(out / "best.pt", epoch=epoch, labels=args.labels, val_metrics=metrics)
     model.save(out / "last.pt", epoch=args.epochs - 1, labels=args.labels)
@@ -240,6 +336,16 @@ def parse_args(argv=None):
     ap.add_argument("--objective", choices=["metrics", "classify"], default="metrics",
                     help="metrics: 7 metric logits, BCE + ranking loss; classify: one score per candidate, "
                          "cross-entropy against the best candidate (see classify_loss)")
+    ap.add_argument("--analytic-weight", type=float, default=0.0,
+                    help="timestep arch: weight of the dense analytic drivable-area loss added to the PDM-label loss")
+    ap.add_argument("--analytic-only", action="store_true",
+                    help="timestep arch: train on the dense analytic labels alone (pretraining; best = lowest analytic loss)")
+    ap.add_argument("--corner-weight", type=float, default=0.0,
+                    help="analytic loss: weight of the per-corner off-lane BCE (adds geom_head; 0 = off)")
+    ap.add_argument("--margin-weight", type=float, default=0.0,
+                    help="analytic loss: weight of the overshoot regression [m] (adds geom_head; 0 = off)")
+    ap.add_argument("--init-from", default=None,
+                    help="checkpoint (train.py best.pt / last.pt) to start from, e.g. an --analytic-only run")
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--split-seed", type=int, default=None,
                     help="seed of the train/val split (default: --seed); fix it to compare runs on one val set")

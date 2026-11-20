@@ -42,6 +42,7 @@ STEP_FEATURES = 9          # normalized pose (4), velocity (2), acceleration (2)
 PROGRESS_SCALE = 10.0      # [m] unit of the raw progress head and its loss
 PROGRESS_THRESHOLD = 0.1   # [m] PDM's PROGRESS_DISTANCE_THRESHOLD: below it every safe candidate gets progress 1
 PROB_EPS = 1e-4            # probabilities are clamped to [eps, 1 - eps] before turning them back into logits
+GEOM_OUTPUTS = 5           # geom_head per step: off-lane logit per corner (4), then the overshoot [m]
 
 
 def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -62,7 +63,7 @@ def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
 class Verifier(nn.Module):
 
     def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True,
-                 num_outputs: int = len(METRICS), arch: str = "plan"):
+                 num_outputs: int = len(METRICS), arch: str = "plan", geom_head: bool = False):
         """
         Args:
             config: DP config (diffusion_planner.utils.config.Config or the training args)
@@ -72,6 +73,8 @@ class Verifier(nn.Module):
             num_outputs: len(METRICS) = one logit per metric (combined with CLS's formula); 1 = a direct score per
                          candidate with no metric heads (classifier, train.py --objective classify; plan arch only)
             arch: "plan" (one token per candidate) or "timestep" (one token per scored state), see the module docstring
+            geom_head: timestep arch: a per-step head for the dense analytic drivable-area labels (train.py
+                       --analytic-weight): one off-lane logit per corner of ego's box, then the overshoot [m]
         """
         super().__init__()
         dim = config.hidden_dim
@@ -79,7 +82,7 @@ class Verifier(nn.Module):
         assert arch in ARCHS, f"arch must be one of {ARCHS}"
         assert arch == "plan" or num_outputs == len(METRICS), "the timestep arch predicts the metrics (no classifier)"
         self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene,
-                        "num_outputs": num_outputs, "arch": arch}
+                        "num_outputs": num_outputs, "arch": arch, "geom_head": geom_head}
         self.use_scene = use_scene
         self.arch = arch
 
@@ -120,6 +123,7 @@ class Verifier(nn.Module):
             self.comfort_pool = nn.MultiheadAttention(dim, num_heads, dropout=dropout, batch_first=True)
             self.comfort_head = nn.Linear(dim, 1)
             self.progress_head = nn.Linear(dim, 1)
+            self.geom_head = nn.Linear(dim, GEOM_OUTPUTS) if geom_head else None
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -206,7 +210,10 @@ class Verifier(nn.Module):
         progress = torch.where(best > PROGRESS_THRESHOLD, gated / best.clamp_min(PROGRESS_THRESHOLD), safe)
         logits = torch.cat([logits[..., :PROGRESS], torch.logit(progress, eps=PROB_EPS)[..., None],
                             logits[..., PROGRESS + 1:]], dim=-1)
-        return logits, {"progress_raw": raw}
+        aux = {"progress_raw": raw, "step_logits": step.view(B, K, *step.shape[1:])}
+        if self.geom_head is not None:
+            aux["geom"] = self.geom_head(x).view(B, K, x.shape[1], GEOM_OUTPUTS)
+        return logits, aux
 
     def forward(self, inputs: Dict[str, torch.Tensor], candidates: torch.Tensor,
                 encoding: Optional[torch.Tensor] = None, return_aux: bool = False):

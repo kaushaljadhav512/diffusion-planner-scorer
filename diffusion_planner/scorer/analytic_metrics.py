@@ -11,6 +11,7 @@ than PDM's LQR-tracked ones.
 from typing import Optional
 
 import numpy as np
+import torch
 
 # nuPlan's get_pacifica_parameters()
 HALF_LENGTH = 2.588
@@ -151,3 +152,66 @@ def corner_lane_distance(lanes: np.ndarray, plans: np.ndarray, horizon: int = 40
         t = np.clip(((p - a) * ab).sum(-1) / np.maximum((ab ** 2).sum(-1), 1e-12), 0.0, 1.0)
         distance[outside] = np.linalg.norm(a + t[..., None] * ab - p, axis=-1).min(axis=(0, 2))
     return distance.reshape(K, T, 4)
+
+
+@torch.no_grad()
+def corner_lane_distance_torch(lanes: torch.Tensor, plans: torch.Tensor, horizon: int = 40, include_current: bool = True,
+                               chunk: int = 4) -> torch.Tensor:
+    """
+    Batched torch version of corner_lane_distance (dense labels for training, computed on the model's device).
+
+    Args:
+        lanes: [B, L, N, 12] normalized DP lane inputs (padded lanes all zero)
+        plans: [B, K, T, 4] candidate plans (x, y, cos, sin), ego frame, unnormalized, T >= horizon
+        chunk: samples processed at once (the intermediates are [chunk, L, K * T' * 4, 2N] floats)
+
+    Returns:
+        distance: [B, K, T', 4] metres from each corner of ego's box to the nearest lane polygon, 0 inside one,
+                  inf when the scene has no lanes
+    """
+    plans = plans[:, :, :horizon].float()
+    B, K = plans.shape[:2]
+    if include_current:
+        current = plans.new_tensor([0.0, 0.0, 1.0, 0.0]).expand(B, K, 1, 4)
+        plans = torch.cat([current, plans], dim=2)
+    T = plans.shape[2]
+
+    # ego_corners
+    xy, cos, sin = plans[..., 0:2], plans[..., 2], plans[..., 3]
+    norm = torch.sqrt(cos ** 2 + sin ** 2)
+    norm = torch.where(norm > 0, norm, torch.ones_like(norm))
+    cos, sin = cos / norm, sin / norm
+    forward = torch.stack([cos, sin], dim=-1)
+    left = torch.stack([-sin, cos], dim=-1)
+    center = xy + REAR_AXLE_TO_CENTER * forward
+    offsets = [(HALF_LENGTH, HALF_WIDTH), (HALF_LENGTH, -HALF_WIDTH), (-HALF_LENGTH, HALF_WIDTH),
+               (-HALF_LENGTH, -HALF_WIDTH)]
+    corners = torch.stack([center + lo * forward + la * left for lo, la in offsets], dim=-2)  # [B, K, T, 4, 2]
+    points = corners.reshape(B, -1, 2)                                                        # [B, P, 2]
+
+    # lane_polygons, padding kept and masked
+    lanes = lanes.float()
+    valid = lanes.abs().sum(dim=(-1, -2)) > 0                                                 # [B, L]
+    center_line = lanes[..., 0:2] * LANE_STD
+    center_line = center_line + center_line.new_tensor([LANE_MEAN_X, 0.0])
+    left_b = center_line + lanes[..., 4:6] * LANE_STD
+    right_b = center_line + lanes[..., 6:8] * LANE_STD
+    polygons = torch.cat([left_b, right_b.flip(-2)], dim=-2)                                  # [B, L, V, 2]
+
+    distance = torch.empty(points.shape[:2], device=points.device)
+    for s in range(0, B, chunk):
+        poly, ok, pts = polygons[s:s + chunk], valid[s:s + chunk], points[s:s + chunk]
+        a = poly[:, :, None]                                                                  # [b, L, 1, V, 2]
+        b = poly.roll(-1, dims=2)[:, :, None]
+        x, y = pts[:, None, :, None, 0], pts[:, None, :, None, 1]                             # [b, 1, P, 1]
+        ay, by = a[..., 1], b[..., 1]
+        straddles = (ay > y) != (by > y)
+        x_cross = a[..., 0] + (y - ay) * (b[..., 0] - a[..., 0]) / torch.where(by == ay, torch.ones_like(by), by - ay)
+        inside = ((straddles & (x < x_cross)).sum(-1) % 2 == 1) & ok[:, :, None]              # [b, L, P]
+        ab = b - a
+        p = pts[:, None, :, None]                                                             # [b, 1, P, 1, 2]
+        t = (((p - a) * ab).sum(-1) / (ab ** 2).sum(-1).clamp_min(1e-12)).clamp(0.0, 1.0)
+        edge = torch.linalg.norm(a + t[..., None] * ab - p, dim=-1).amin(-1)                  # [b, L, P]
+        edge = torch.where(ok[:, :, None], edge, torch.full_like(edge, float("inf")))
+        distance[s:s + chunk] = torch.where(inside.any(1), torch.zeros_like(edge[:, 0]), edge.amin(1))
+    return distance.view(B, K, T, 4)
