@@ -177,10 +177,11 @@ def test_scene_padding_mask_matches_encoder(config):
     assert expected.any() and not expected.all()
 
 
+@pytest.mark.parametrize("arch", ["plan", "timestep"])
 @pytest.mark.parametrize("use_scene", [True, False])
-def test_verifier_shapes_and_equivariance(config, use_scene):
+def test_verifier_shapes_and_equivariance(config, use_scene, arch):
     torch.manual_seed(0)
-    model = Verifier(config, depth=2, use_scene=use_scene).eval()
+    model = Verifier(config, depth=2, use_scene=use_scene, arch=arch).eval()
     inputs = _scene_inputs(config, batch=2)
     candidates = torch.randn(2, K, T, 4) * 10
 
@@ -193,12 +194,60 @@ def test_verifier_shapes_and_equivariance(config, use_scene):
     assert torch.allclose(model(inputs, candidates[:, perm]), logits[:, perm], atol=1e-5)
 
 
-def test_verifier_uses_precomputed_encoding(config):
-    model = Verifier(config).eval()
+@pytest.mark.parametrize("arch", ["plan", "timestep"])
+def test_verifier_uses_precomputed_encoding(config, arch):
+    model = Verifier(config, arch=arch).eval()
     inputs = _scene_inputs(config, batch=2)
     candidates = torch.randn(2, K, T, 4)
     encoding = model.encoder(inputs)["encoding"]
     assert torch.allclose(model(inputs, candidates, encoding=encoding), model(inputs, candidates), atol=1e-5)
+
+
+def test_timestep_step_features(config):
+    from diffusion_planner.scorer.model import HORIZON, STEP_FEATURES
+    model = Verifier(config, arch="timestep")
+    plans = torch.zeros(1, 1, T, 4)
+    plans[..., 0] = 0.5 * torch.arange(1, T + 1)          # 5 m/s straight ahead, poses every 0.1 s
+    plans[..., 2] = 1.0
+    f = model.step_features(plans)
+    assert f.shape == (1, 1, HORIZON + 1, STEP_FEATURES)
+    assert torch.allclose(f[0, 0, :, 4], torch.full((HORIZON + 1,), 0.5))  # vx / 10 at every state
+    assert torch.allclose(f[0, 0, :, 6:8], torch.zeros(HORIZON + 1, 2))   # no acceleration
+    # Only the first HORIZON poses are read
+    plans[:, :, HORIZON:] = 1e3
+    assert torch.allclose(model.step_features(plans), f)
+
+
+def test_timestep_any_step_and_progress(config):
+    """One failing step fails an any-step metric; progress is gated and normalized across candidates."""
+    from diffusion_planner.scorer.model import ANY_STEP, HORIZON, PROGRESS, PROGRESS_SCALE
+    torch.manual_seed(0)
+    model = Verifier(config, arch="timestep").eval()
+    inputs = _scene_inputs(config, batch=1)
+    candidates = torch.randn(1, 3, T, 4)
+    with torch.no_grad():
+        model.step_head.weight.zero_()
+        model.step_head.bias.fill_(-20.0)                  # every step passes, speed-limit compliance ~0
+        logits = model(inputs, candidates)
+        assert (torch.sigmoid(logits[0, :, ANY_STEP]) > 0.99).all()
+
+        # Step outputs that depend on the token: make step 7 of every candidate fail on drivable area (index 1)
+        model.time_emb.zero_()
+        model.time_emb[7, 0] = 1.0
+        model.layers = torch.nn.ModuleList()               # tokens reach the head unchanged (after the norm)
+        model.step_proj = torch.nn.Identity()
+        model.step_features = lambda c: torch.zeros(*c.shape[:2], HORIZON + 1, model.time_emb.shape[1])
+        model.norm = torch.nn.Identity()
+        model.step_head.weight[1, 0] = 40.0
+        logits = model(inputs, candidates)
+        assert (torch.sigmoid(logits[0, :, 1]) < 0.01).all()   # drivable fails
+        assert (torch.sigmoid(logits[0, :, 0]) > 0.99).all()   # collision still passes
+
+        # Progress: gated by the (now failing) drivable metric, so every candidate is unsafe -> 0 progress
+        model.progress_head.bias.fill_(1.0)
+        _, aux = model(inputs, candidates, return_aux=True)
+        assert torch.allclose(aux["progress_raw"], torch.full((1, 3), PROGRESS_SCALE * float(torch.nn.functional.softplus(torch.tensor(1.0)))))
+        assert (torch.sigmoid(model(inputs, candidates)[0, :, PROGRESS]) < 0.01).all()
 
 
 def test_load_dp_weights_and_freeze(config):
@@ -265,6 +314,31 @@ def test_train_overfits_small_set(tmp_path, config):
     loader = DataLoader(LabelDataset(find_samples(tmp_path / "labels")[:16]), batch_size=8)
     reloaded = train_module.evaluate(model, loader, "oracle", "cpu")
     assert reloaded["all/verifier/regret"] == pytest.approx(best["all/verifier/regret"], abs=1e-6)
+
+
+def test_train_timestep_overfits_small_set(tmp_path, config):
+    _write_dataset(tmp_path / "labels", config, n_scenarios=4, steps=4)
+    args = train_module.parse_args([
+        "--data", str(tmp_path / "labels"), "--out", str(tmp_path / "run"), "--overfit", "16", "--arch", "timestep",
+        "--epochs", "40", "--batch-size", "8", "--lr", "1e-3", "--num-workers", "0", "--device", "cpu",
+        "--rank-weight", "0.5",
+    ])
+    best = train_module.run(args, config=config)
+    assert best["all/verifier/regret"] < best["all/first/regret"]
+    assert best["all/verifier/regret"] < best["all/random/regret"]
+
+    checkpoint = torch.load(tmp_path / "run" / "best.pt", weights_only=False)
+    assert checkpoint["hparams"]["arch"] == "timestep"
+    model = Verifier(config, **checkpoint["hparams"])
+    model.load_state_dict(checkpoint["state_dict"])
+    loader = DataLoader(LabelDataset(find_samples(tmp_path / "labels")[:16]), batch_size=8)
+    reloaded = train_module.evaluate(model, loader, "oracle", "cpu")
+    assert reloaded["all/verifier/regret"] == pytest.approx(best["all/verifier/regret"], abs=1e-6)
+
+
+def test_timestep_rejects_classifier(config):
+    with pytest.raises(AssertionError):
+        Verifier(config, arch="timestep", num_outputs=1)
 
 
 def test_label_stats(tmp_path, config):

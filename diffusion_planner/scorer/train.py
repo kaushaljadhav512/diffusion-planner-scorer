@@ -7,9 +7,11 @@ Train the verifier on recorded labels (task 2.12).
     python -m diffusion_planner.scorer.train --data ... --labels cv        # constant-velocity labels (3.2)
     python -m diffusion_planner.scorer.train --data ... --objective classify   # one score per candidate, no metrics
     python -m diffusion_planner.scorer.train --data ... --train-frac 0.25 --split-seed 0   # learning curve point
+    python -m diffusion_planner.scorer.train --data ... --arch timestep    # one query token per scored state
 
 Loss: BCE per metric against the PDM labels (soft targets), optionally plus a listwise ranking loss on the combined
-score. Every epoch reports, on the held-out scenarios, against the oracle's combined score (the selection target):
+score. The timestep arch adds a smooth-L1 loss on its raw progress (in units of PROGRESS_SCALE metres) against the
+labels' raw progress, weighted by --progress-weight. Every epoch reports, on the held-out scenarios, against the oracle's combined score (the selection target):
 
     top1    fraction of samples where the pick is among the best candidates (ties count)
     regret  mean of (best combined score - combined score of the pick)
@@ -32,7 +34,7 @@ from torch.utils.data import DataLoader
 
 from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario, subsample_scenarios
 from diffusion_planner.scorer.metrics import METRICS, combined_score
-from diffusion_planner.scorer.model import Verifier
+from diffusion_planner.scorer.model import ARCHS, PROGRESS_SCALE, Verifier
 
 ROOT = Path(__file__).resolve().parents[2]
 TIE_TOLERANCE = 1e-6
@@ -153,8 +155,10 @@ def run(args, config=None) -> Dict[str, float]:
     print(f"[train] {len(train_files)} train / {len(val_files)} val samples, "
           f"{len({f.parent for f in train_files})} / {len({f.parent for f in val_files})} scenarios")
 
+    assert args.arch == "plan" or args.objective == "metrics", "--arch timestep needs --objective metrics"
     hparams = dict(depth=args.depth, num_heads=args.num_heads, dropout=0.0 if args.overfit else args.dropout,
-                   use_scene=not args.no_scene, num_outputs=1 if args.objective == "classify" else len(METRICS))
+                   use_scene=not args.no_scene, num_outputs=1 if args.objective == "classify" else len(METRICS),
+                   arch=args.arch)
     if config is None:
         model = Verifier.from_dp_checkpoint(args.dp_args, args.dp_ckpt, device=args.device, **hparams)
     else:
@@ -177,11 +181,14 @@ def run(args, config=None) -> Dict[str, float]:
         start, losses = time.time(), []
         for batch in train_loader:
             batch = to_device(batch, args.device)
-            logits = model(batch["inputs"], batch["candidates"])
+            logits, aux = model(batch["inputs"], batch["candidates"], return_aux=True)
             if args.objective == "classify":
                 loss = classify_loss(logits[..., 0], batch[f"metrics_{args.labels}"], args.rank_temperature)
             else:
                 loss = loss_fn(logits, batch[f"metrics_{args.labels}"], args.rank_weight, args.rank_temperature)
+            if "progress_raw" in aux and args.progress_weight > 0:
+                loss = loss + args.progress_weight * F.smooth_l1_loss(
+                    aux["progress_raw"] / PROGRESS_SCALE, batch[f"progress_{args.labels}"] / PROGRESS_SCALE)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -223,6 +230,10 @@ def parse_args(argv=None):
     ap.add_argument("--num-heads", type=int, default=6)
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--no-scene", action="store_true", help="trajectory-only verifier (ablation 3.3)")
+    ap.add_argument("--arch", choices=ARCHS, default="plan",
+                    help="plan: one token per candidate; timestep: one token per scored state (see model.py)")
+    ap.add_argument("--progress-weight", type=float, default=1.0,
+                    help="timestep arch: weight of the smooth-L1 loss on raw progress")
     ap.add_argument("--rank-weight", type=float, default=3.0, help="weight of the listwise ranking loss")
     ap.add_argument("--rank-temperature", type=float, default=0.02,
                     help="softmax temperature of the target combined scores (ranking loss and classifier)")

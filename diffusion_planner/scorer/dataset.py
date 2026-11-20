@@ -62,6 +62,8 @@ class LabelDataset(Dataset):
         candidates:      [K, T, 4] ego plans, ego frame, unnormalized (the verifier normalizes them)
         metrics_oracle:  [K, 7] per-metric labels with logged futures
         metrics_cv:      [K, 7] the same with constant-velocity forecasts (PDM selection, as a baseline)
+        progress_oracle: [K] raw progress along the centerline [m] behind metrics_oracle's normalized progress
+        progress_cv:     [K] the same for metrics_cv
     """
 
     def __init__(self, files: Sequence[Path]):
@@ -77,4 +79,6 @@ class LabelDataset(Dataset):
             "candidates": torch.from_numpy(sample["candidates"]).float(),
             "metrics_oracle": torch.from_numpy(sample["metrics_oracle"]).float(),
             "metrics_cv": torch.from_numpy(sample["metrics_cv"]).float(),
+            "progress_oracle": torch.from_numpy(sample["progress_oracle"]).float(),
+            "progress_cv": torch.from_numpy(sample["progress_cv"]).float(),
         }

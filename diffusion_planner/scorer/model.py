@@ -2,10 +2,21 @@
 Learned verifier for best-of-K Diffusion Planner (task 2.11).
 
 Scene: DP's frozen encoder (agents, static objects, lanes: 107 tokens x 192) plus DP's frozen route encoder
-(1 token) and a learned ego-state token. Candidates: one token per ego plan, an MLP over its normalized 80 x 4
-states. Transformer decoder layers: candidates attend to each other (self-attention) and to the scene
-(cross-attention). Heads: one logit per metric of diffusion_planner.scorer.metrics, trained with BCE against the
-PDM labels; the combined score uses CLS's formula.
+(1 token) and a learned ego-state token. Two candidate architectures (arch):
+
+  plan      one token per ego plan, an MLP over its normalized 80 x 4 states. Transformer decoder layers:
+            candidates attend to each other (self-attention) and to the scene (cross-attention). Heads: one logit
+            per metric of diffusion_planner.scorer.metrics.
+  timestep  one token per scored state of each plan (current state + the 40 poses PDM scores, 4 s at 0.1 s): pose,
+            velocity, acceleration, plus a learned time embedding. One shared decoder per candidate: the states of
+            a plan attend to each other (self-attention) and each state to the scene (cross-attention); candidates
+            never see each other. Metrics from per-step outputs: the any-step metrics (collision, drivable area,
+            driving direction, TTC) fail with logit logsumexp_t(l_t), a smooth max over per-step failure logits
+            (a product of per-step pass probabilities starves the per-step logits of gradient), speed limit
+            as the mean per-step compliance, comfort by attention pooling, progress as raw metres from the last
+            state, gated by the predicted multiplicative metrics and normalized by the best candidate as PDM does.
+
+Both return one logit per metric, trained with BCE against the PDM labels; the combined score uses CLS's formula.
 
     model = Verifier.from_dp_checkpoint("checkpoints/args.json", "checkpoints/model.pth")
     scores = model.score(inputs, candidates)   # [B, K], higher is better
@@ -14,12 +25,23 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.models.layers import Mlp
 
 from diffusion_planner.model.diffusion_planner import Diffusion_Planner_Encoder
 from diffusion_planner.model.module.decoder import RouteEncoder
 from diffusion_planner.scorer.metrics import METRICS, combined_score
 from diffusion_planner.utils.config import Config
+
+ARCHS = ("plan", "timestep")
+HORIZON = 40               # plan poses PDM scores (4 s at 0.1 s); the timestep arch adds the current state
+DT = 0.1                   # [s] between plan poses
+ANY_STEP = [0, 1, 2, 4]    # METRICS a candidate fails if any scored state fails: collision, drivable, direction, ttc
+SPEED_LIMIT, COMFORT, PROGRESS = 5, 6, 3
+STEP_FEATURES = 9          # normalized pose (4), velocity (2), acceleration (2), speed (1)
+PROGRESS_SCALE = 10.0      # [m] unit of the raw progress head and its loss
+PROGRESS_THRESHOLD = 0.1   # [m] PDM's PROGRESS_DISTANCE_THRESHOLD: below it every safe candidate gets progress 1
+PROB_EPS = 1e-4            # probabilities are clamped to [eps, 1 - eps] before turning them back into logits
 
 
 def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -40,22 +62,26 @@ def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
 class Verifier(nn.Module):
 
     def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True,
-                 num_outputs: int = len(METRICS)):
+                 num_outputs: int = len(METRICS), arch: str = "plan"):
         """
         Args:
             config: DP config (diffusion_planner.utils.config.Config or the training args)
-            depth: transformer decoder layers over the candidates
+            depth: transformer decoder layers over the candidates (plan) or over each candidate's states (timestep)
             use_scene: False drops the encoder and route tokens (trajectory-only ablation, task 3.3); the ego-state
                        token stays
             num_outputs: len(METRICS) = one logit per metric (combined with CLS's formula); 1 = a direct score per
-                         candidate with no metric heads (classifier, train.py --objective classify)
+                         candidate with no metric heads (classifier, train.py --objective classify; plan arch only)
+            arch: "plan" (one token per candidate) or "timestep" (one token per scored state), see the module docstring
         """
         super().__init__()
         dim = config.hidden_dim
         assert num_outputs in (1, len(METRICS)), f"num_outputs must be 1 or {len(METRICS)}"
+        assert arch in ARCHS, f"arch must be one of {ARCHS}"
+        assert arch == "plan" or num_outputs == len(METRICS), "the timestep arch predicts the metrics (no classifier)"
         self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene,
-                        "num_outputs": num_outputs}
+                        "num_outputs": num_outputs, "arch": arch}
         self.use_scene = use_scene
+        self.arch = arch
 
         # Frozen DP modules (weights from the DP checkpoint, see from_dp_checkpoint)
         self.encoder = Diffusion_Planner_Encoder(config)
@@ -70,7 +96,13 @@ class Verifier(nn.Module):
 
         self.scene_proj = nn.Linear(dim, dim)
         self.ego_proj = Mlp(in_features=10, hidden_features=dim, out_features=dim, act_layer=nn.GELU)
-        self.plan_proj = Mlp(in_features=config.future_len * 4, hidden_features=2 * dim, out_features=dim, act_layer=nn.GELU)
+        if arch == "plan":
+            self.plan_proj = Mlp(in_features=config.future_len * 4, hidden_features=2 * dim, out_features=dim,
+                                 act_layer=nn.GELU)
+        else:
+            self.step_proj = Mlp(in_features=STEP_FEATURES, hidden_features=2 * dim, out_features=dim,
+                                 act_layer=nn.GELU)
+            self.time_emb = nn.Parameter(torch.randn(HORIZON + 1, dim) * 0.02)
 
         self.layers = nn.ModuleList([
             nn.TransformerDecoderLayer(dim, num_heads, dim_feedforward=4 * dim, dropout=dropout,
@@ -78,7 +110,16 @@ class Verifier(nn.Module):
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, num_outputs)
+        if arch == "plan":
+            self.head = nn.Linear(dim, num_outputs)
+        else:
+            # Per step: a failure logit per any-step metric, then a speed-limit compliance logit. At logit 0 on
+            # every step a candidate starts at failure logit log(41), P(pass) ~ 0.98 (see _timestep_forward)
+            self.step_head = nn.Linear(dim, len(ANY_STEP) + 1)
+            self.comfort_query = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
+            self.comfort_pool = nn.MultiheadAttention(dim, num_heads, dropout=dropout, batch_first=True)
+            self.comfort_head = nn.Linear(dim, 1)
+            self.progress_head = nn.Linear(dim, 1)
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -110,23 +151,85 @@ class Verifier(nn.Module):
         mask = torch.cat([scene_padding_mask(inputs), torch.zeros(B, 2, dtype=torch.bool, device=ego.device)], dim=1)
         return memory, mask
 
+    def step_features(self, candidates: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            candidates: [B, K, T, 4] ego plans (x, y, cos, sin), ego frame, unnormalized, T >= HORIZON
+
+        Returns:
+            features: [B, K, HORIZON + 1, STEP_FEATURES] per scored state (current state first, ego at the origin):
+                      normalized pose, velocity / 10, acceleration / 5 (clamped to +-5), speed / 10, from finite
+                      differences of the poses (the first state copies the second's velocity and acceleration)
+        """
+        plans = candidates[:, :, :HORIZON]
+        current = plans.new_tensor([0.0, 0.0, 1.0, 0.0]).expand(*plans.shape[:2], 1, 4)
+        states = torch.cat([current, plans], dim=2)                        # [B, K, H + 1, 4]
+        vel = torch.diff(states[..., :2], dim=2) / DT
+        vel = torch.cat([vel[:, :, :1], vel], dim=2)
+        acc = torch.diff(vel, dim=2) / DT
+        acc = torch.cat([acc[:, :, :1], acc], dim=2)
+        pose = (states - self.plan_mean) / self.plan_std
+        speed = vel.norm(dim=-1, keepdim=True)
+        return torch.cat([pose, vel / 10.0, (acc / 5.0).clamp(-5.0, 5.0), speed / 10.0], dim=-1)
+
+    def _timestep_forward(self, memory: torch.Tensor, mask: torch.Tensor, candidates: torch.Tensor
+                          ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """The timestep arch (see the module docstring): logits [B, K, len(METRICS)], aux {"progress_raw": [B, K]}."""
+        B, K = candidates.shape[:2]
+        x = self.step_proj(self.step_features(candidates)) + self.time_emb # [B, K, H + 1, D]
+        x = x.flatten(0, 1)                                                # [B * K, H + 1, D]
+        memory, mask = memory.repeat_interleave(K, dim=0), mask.repeat_interleave(K, dim=0)
+        for layer in self.layers:
+            x = layer(x, memory, memory_key_padding_mask=mask)
+        x = self.norm(x)
+
+        step = self.step_head(x)                                           # [B * K, H + 1, len(ANY_STEP) + 1]
+        # Any-step metrics: the candidate fails with logit logsumexp_t(l_t), a smooth max over its states (one
+        # failing state suffices; the softmax-weighted gradient reaches every step). Pass logit = its negation
+        any_step = -torch.logsumexp(step[..., :len(ANY_STEP)], dim=1)     # [B * K, len(ANY_STEP)]
+        speed = torch.logit(torch.sigmoid(step[..., -1]).mean(dim=1), eps=PROB_EPS)
+        pooled, _ = self.comfort_pool(self.comfort_query.expand(len(x), -1, -1), x, x)
+        comfort = self.comfort_head(pooled[:, 0])[:, 0]
+        raw = F.softplus(self.progress_head(x[:, -1])[:, 0]) * PROGRESS_SCALE
+
+        logits = x.new_zeros(B * K, len(METRICS))
+        logits[:, ANY_STEP] = any_step
+        logits[:, SPEED_LIMIT] = speed
+        logits[:, COMFORT] = comfort
+        logits = logits.view(B, K, -1)
+        raw = raw.view(B, K)
+
+        # Progress as PDM normalizes it: raw progress gated by the multiplicative metrics, over the best candidate
+        safe = torch.sigmoid(logits[..., :3]).prod(dim=-1)                 # collision * drivable * direction
+        gated = raw * safe
+        best = gated.max(dim=1, keepdim=True).values
+        progress = torch.where(best > PROGRESS_THRESHOLD, gated / best.clamp_min(PROGRESS_THRESHOLD), safe)
+        logits = torch.cat([logits[..., :PROGRESS], torch.logit(progress, eps=PROB_EPS)[..., None],
+                            logits[..., PROGRESS + 1:]], dim=-1)
+        return logits, {"progress_raw": raw}
+
     def forward(self, inputs: Dict[str, torch.Tensor], candidates: torch.Tensor,
-                encoding: Optional[torch.Tensor] = None) -> torch.Tensor:
+                encoding: Optional[torch.Tensor] = None, return_aux: bool = False):
         """
         Args:
             inputs: normalized model inputs, each [B, ...]
             candidates: [B, K, T, 4] ego plans (x, y, cos, sin), ego frame, unnormalized (as sample_candidates gives)
             encoding: optional precomputed DP encoder output, see encode
+            return_aux: also return a dict of auxiliary outputs (timestep arch: "progress_raw" [B, K] metres)
 
         Returns:
-            logits: [B, K, num_outputs] (len(METRICS) metric logits, or 1 direct score)
+            logits: [B, K, num_outputs] (len(METRICS) metric logits, or 1 direct score); (logits, aux) with return_aux
         """
         memory, mask = self.encode(inputs, encoding)
-        plans = (candidates - self.plan_mean) / self.plan_std
-        x = self.plan_proj(plans.flatten(start_dim=2))                     # [B, K, D]
-        for layer in self.layers:
-            x = layer(x, memory, memory_key_padding_mask=mask)
-        return self.head(self.norm(x))
+        if self.arch == "timestep":
+            logits, aux = self._timestep_forward(memory, mask, candidates)
+        else:
+            plans = (candidates - self.plan_mean) / self.plan_std
+            x = self.plan_proj(plans.flatten(start_dim=2))                 # [B, K, D]
+            for layer in self.layers:
+                x = layer(x, memory, memory_key_padding_mask=mask)
+            logits, aux = self.head(self.norm(x)), {}
+        return (logits, aux) if return_aux else logits
 
     def score(self, inputs: Dict[str, torch.Tensor], candidates: torch.Tensor,
               encoding: Optional[torch.Tensor] = None) -> torch.Tensor:
