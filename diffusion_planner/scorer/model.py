@@ -18,6 +18,11 @@ Scene: DP's frozen encoder (agents, static objects, lanes: 107 tokens x 192) plu
 
 Both return one logit per metric, trained with BCE against the PDM labels; the combined score uses CLS's formula.
 
+lane_segments > 0 (train.py --lane-segments) adds trainable lane segment tokens to the memory: each of DP's lane inputs
+(20 points) is cut into lane_segments pieces and each piece becomes its own token, placed at its own center. DP's
+frozen lane encoder mean-pools a lane's 20 points into one token, which loses the boundary geometry the drivable-area
+label depends on; these tokens keep it (see LaneSegmentEncoder).
+
     model = Verifier.from_dp_checkpoint("checkpoints/args.json", "checkpoints/model.pth")
     scores = model.score(inputs, candidates)   # [B, K], higher is better
 """
@@ -45,6 +50,44 @@ PROB_EPS = 1e-4            # probabilities are clamped to [eps, 1 - eps] before 
 GEOM_OUTPUTS = 5           # geom_head per step: off-lane logit per corner (4), then the overshoot [m]
 
 
+class LaneSegmentEncoder(nn.Module):
+    """
+    Trainable lane segment tokens. Each lane's points are cut into `segments` consecutive pieces; a token per piece
+    from its local shape (centerline, direction and boundary offsets of its points, relative to the piece's center)
+    plus the piece's position (center x, y and heading). No pooling over a lane, no traffic light or speed limit
+    (DP's own lane tokens still carry those).
+    """
+
+    def __init__(self, lane_len: int, segments: int, dim: int):
+        super().__init__()
+        assert lane_len % segments == 0, f"lane_len {lane_len} must split into {segments} equal segments"
+        self.segments, self.points = segments, lane_len // segments
+        self.shape_proj = Mlp(in_features=self.points * 8, hidden_features=dim, out_features=dim, act_layer=nn.GELU)
+        self.pos_proj = nn.Linear(4, dim)
+
+    def forward(self, lanes: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            lanes: [B, L, N, 12] normalized DP lane inputs (x, y, dx, dy, left - center (2), right - center (2),
+                   traffic light (4)); padded points are all zero
+
+        Returns:
+            tokens: [B, L * segments, D]; mask: [B, L * segments] bool, True = empty segment
+        """
+        B, L = lanes.shape[:2]
+        x = lanes[..., :8].reshape(B, L * self.segments, self.points, 8)   # [B, S, P, 8]
+        valid = (x != 0).any(dim=-1)                                       # [B, S, P]
+        mask = ~valid.any(dim=-1)                                          # [B, S]
+        count = valid.sum(dim=-1, keepdim=True).clamp_min(1)
+        center = (x[..., :2] * valid[..., None]).sum(dim=2) / count        # [B, S, 2], mean of the valid points
+        direction = (x[..., 2:4] * valid[..., None]).sum(dim=2)
+        heading = torch.atan2(direction[..., 1], direction[..., 0])
+        local = torch.cat([x[..., :2] - center[:, :, None], x[..., 2:]], dim=-1) * valid[..., None]
+        pos = torch.cat([center, torch.cos(heading)[..., None], torch.sin(heading)[..., None]], dim=-1)
+        tokens = self.shape_proj(local.flatten(start_dim=2)) + self.pos_proj(pos)
+        return tokens * (~mask)[..., None], mask
+
+
 def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
     """
     The padding mask DP's encoder uses for its 107 tokens (agents, static objects, lanes): True = empty slot.
@@ -63,7 +106,8 @@ def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
 class Verifier(nn.Module):
 
     def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True,
-                 num_outputs: int = len(METRICS), arch: str = "plan", geom_head: bool = False):
+                 num_outputs: int = len(METRICS), arch: str = "plan", geom_head: bool = False,
+                 lane_segments: int = 0):
         """
         Args:
             config: DP config (diffusion_planner.utils.config.Config or the training args)
@@ -75,6 +119,8 @@ class Verifier(nn.Module):
             arch: "plan" (one token per candidate) or "timestep" (one token per scored state), see the module docstring
             geom_head: timestep arch: a per-step head for the dense analytic drivable-area labels (train.py
                        --analytic-weight): one off-lane logit per corner of ego's box, then the overshoot [m]
+            lane_segments: > 0 adds lane_num * lane_segments trainable lane segment tokens to the memory
+                           (LaneSegmentEncoder); 0 = DP's tokens only (w6). Needs use_scene
         """
         super().__init__()
         dim = config.hidden_dim
@@ -82,7 +128,8 @@ class Verifier(nn.Module):
         assert arch in ARCHS, f"arch must be one of {ARCHS}"
         assert arch == "plan" or num_outputs == len(METRICS), "the timestep arch predicts the metrics (no classifier)"
         self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene,
-                        "num_outputs": num_outputs, "arch": arch, "geom_head": geom_head}
+                        "num_outputs": num_outputs, "arch": arch, "geom_head": geom_head,
+                        "lane_segments": lane_segments}
         self.use_scene = use_scene
         self.arch = arch
 
@@ -98,6 +145,8 @@ class Verifier(nn.Module):
         self.register_buffer("plan_std", torch.as_tensor(config.state_normalizer.std, dtype=torch.float32)[0, 0])
 
         self.scene_proj = nn.Linear(dim, dim)
+        assert lane_segments == 0 or use_scene, "lane segment tokens are scene tokens (need use_scene)"
+        self.lane_segments = LaneSegmentEncoder(config.lane_len, lane_segments, dim) if lane_segments else None
         self.ego_proj = Mlp(in_features=10, hidden_features=dim, out_features=dim, act_layer=nn.GELU)
         if arch == "plan":
             self.plan_proj = Mlp(in_features=config.future_len * 4, hidden_features=2 * dim, out_features=dim,
@@ -153,6 +202,10 @@ class Verifier(nn.Module):
             route = self.route_encoder(inputs["route_lanes"])[:, None]     # [B, 1, D]
         memory = torch.cat([self.scene_proj(torch.cat([encoding, route], dim=1)), ego], dim=1)
         mask = torch.cat([scene_padding_mask(inputs), torch.zeros(B, 2, dtype=torch.bool, device=ego.device)], dim=1)
+        if self.lane_segments is not None:
+            segments, segment_mask = self.lane_segments(inputs["lanes"].float())
+            memory = torch.cat([memory, segments], dim=1)
+            mask = torch.cat([mask, segment_mask], dim=1)
         return memory, mask
 
     def step_features(self, candidates: torch.Tensor) -> torch.Tensor:

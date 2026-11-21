@@ -238,7 +238,7 @@ def run(args, config=None) -> Dict[str, float]:
     hparams = dict(depth=args.depth, num_heads=args.num_heads, dropout=0.0 if args.overfit else args.dropout,
                    use_scene=not args.no_scene, num_outputs=1 if args.objective == "classify" else len(METRICS),
                    arch=args.arch, geom_head=(analytic and (args.corner_weight > 0 or args.margin_weight > 0))
-                   or bool(init and init["hparams"].get("geom_head")))
+                   or bool(init and init["hparams"].get("geom_head")), lane_segments=args.lane_segments)
     if config is None:
         model = Verifier.from_dp_checkpoint(args.dp_args, args.dp_ckpt, device=args.device, **hparams)
     else:
@@ -344,6 +344,8 @@ def parse_args(argv=None):
                     help="analytic loss: weight of the per-corner off-lane BCE (adds geom_head; 0 = off)")
     ap.add_argument("--margin-weight", type=float, default=0.0,
                     help="analytic loss: weight of the overshoot regression [m] (adds geom_head; 0 = off)")
+    ap.add_argument("--lane-segments", type=int, default=0,
+                    help="> 0: add trainable lane segment tokens, each lane cut into this many pieces (0 = w6)")
     ap.add_argument("--init-from", default=None,
                     help="checkpoint (train.py best.pt / last.pt) to start from, e.g. an --analytic-only run")
     ap.add_argument("--val-frac", type=float, default=0.1)

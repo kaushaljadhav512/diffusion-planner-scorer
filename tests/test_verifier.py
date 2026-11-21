@@ -444,3 +444,34 @@ def test_analytic_pretrain_then_finetune(tmp_path, config):
                   "--corner-weight", "0.5", "--margin-weight", "0.5"]), config=config)
     assert "analytic/loss" in multi
     assert torch.load(tmp_path / "multi" / "best.pt", weights_only=False)["hparams"]["geom_head"]
+
+
+@pytest.mark.parametrize("arch", ["plan", "timestep"])
+def test_lane_segment_tokens(config, arch):
+    from diffusion_planner.scorer.model import LaneSegmentEncoder
+    torch.manual_seed(0)
+    model = Verifier(config, arch=arch, lane_segments=4).eval()
+    inputs = _scene_inputs(config, batch=2)
+    candidates = torch.randn(2, K, T, 4) * 10
+    memory, mask = model.encode(inputs)
+    L = inputs["lanes"].shape[1]
+    base, _ = Verifier(config, arch=arch).eval().encode(inputs)
+    assert memory.shape[1] == base.shape[1] + 4 * L and mask.shape == memory.shape[:2]
+    # an empty lane gives 4 masked segments, a full lane none
+    lanes = inputs["lanes"]
+    empty = (lanes[..., :8] == 0).all(dim=-1).all(dim=-1)              # [B, L]
+    seg_mask = mask[:, -4 * L:].view(2, L, 4)
+    assert torch.equal(seg_mask.all(dim=-1), empty)
+    assert model(inputs, candidates).shape == (2, K, len(METRICS))
+    perm = torch.tensor([2, 0, 3, 1])
+    assert torch.allclose(model(inputs, candidates[:, perm]), model(inputs, candidates)[:, perm], atol=1e-5)
+    # a segment token depends only on its own points
+    enc = LaneSegmentEncoder(config.lane_len, 4, config.hidden_dim)
+    a, _ = enc(lanes.float())
+    changed = lanes.clone().float()
+    changed[:, :, -1, :8] += 0.5                                       # last point of each lane = last segment
+    b, _ = enc(changed)
+    a, b = a.view(2, L, 4, -1), b.view(2, L, 4, -1)
+    assert torch.allclose(a[:, :, :3], b[:, :, :3])
+    # hparams round-trip
+    assert model.hparams["lane_segments"] == 4
