@@ -8,6 +8,7 @@ Train the verifier on recorded labels (task 2.12).
     python -m diffusion_planner.scorer.train --data ... --objective classify   # one score per candidate, no metrics
     python -m diffusion_planner.scorer.train --data ... --train-frac 0.25 --split-seed 0   # learning curve point
     python -m diffusion_planner.scorer.train --data ... --arch timestep    # one query token per scored state
+    python -m diffusion_planner.scorer.train --data ... --arch timestep --step-lane scalars   # + local lane features
 
 Loss: BCE per metric against the PDM labels (soft targets), optionally plus a listwise ranking loss on the combined
 score. The timestep arch adds a smooth-L1 loss on its raw progress (in units of PROGRESS_SCALE metres) against the
@@ -39,6 +40,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from diffusion_planner.scorer.analytic_metrics import corner_lane_distance_torch
+from diffusion_planner.scorer.lane_features import STEP_LANE_MODES
 from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario, subsample_scenarios
 from diffusion_planner.scorer.metrics import METRICS, combined_score
 from diffusion_planner.scorer.model import ANY_STEP, ARCHS, HORIZON, PROGRESS_SCALE, Verifier
@@ -233,12 +235,14 @@ def run(args, config=None) -> Dict[str, float]:
     analytic = args.analytic_only or args.analytic_weight > 0
     init = torch.load(args.init_from, map_location="cpu", weights_only=False) if args.init_from else None
     assert not analytic or args.arch == "timestep", "dense analytic labels need --arch timestep"
+    assert args.step_lane == "none" or args.arch == "timestep", "--step-lane needs --arch timestep"
     assert analytic or (args.corner_weight == 0 and args.margin_weight == 0), \
         "--corner-weight / --margin-weight need --analytic-weight or --analytic-only"
     hparams = dict(depth=args.depth, num_heads=args.num_heads, dropout=0.0 if args.overfit else args.dropout,
                    use_scene=not args.no_scene, num_outputs=1 if args.objective == "classify" else len(METRICS),
                    arch=args.arch, geom_head=(analytic and (args.corner_weight > 0 or args.margin_weight > 0))
-                   or bool(init and init["hparams"].get("geom_head")))
+                   or bool(init and init["hparams"].get("geom_head")),
+                   step_lane=args.step_lane)
     if config is None:
         model = Verifier.from_dp_checkpoint(args.dp_args, args.dp_ckpt, device=args.device, **hparams)
     else:
@@ -344,6 +348,9 @@ def parse_args(argv=None):
                     help="analytic loss: weight of the per-corner off-lane BCE (adds geom_head; 0 = off)")
     ap.add_argument("--margin-weight", type=float, default=0.0,
                     help="analytic loss: weight of the overshoot regression [m] (adds geom_head; 0 = off)")
+    ap.add_argument("--step-lane", choices=STEP_LANE_MODES, default="none",
+                    help="timestep arch: per-step local lane features added to each state's token (lane_features.py): "
+                         "none (w6), scalars (exact geometry), segments (scalars + pooled nearest lane segments)")
     ap.add_argument("--init-from", default=None,
                     help="checkpoint (train.py best.pt / last.pt) to start from, e.g. an --analytic-only run")
     ap.add_argument("--val-frac", type=float, default=0.1)

@@ -30,6 +30,8 @@ from timm.models.layers import Mlp
 
 from diffusion_planner.model.diffusion_planner import Diffusion_Planner_Encoder
 from diffusion_planner.model.module.decoder import RouteEncoder
+from diffusion_planner.scorer.lane_features import SEGMENT_FEATURES, STEP_LANE_MODES, STEP_LANE_SCALARS, \
+    step_lane_features
 from diffusion_planner.scorer.metrics import METRICS, combined_score
 from diffusion_planner.utils.config import Config
 
@@ -43,6 +45,8 @@ PROGRESS_SCALE = 10.0      # [m] unit of the raw progress head and its loss
 PROGRESS_THRESHOLD = 0.1   # [m] PDM's PROGRESS_DISTANCE_THRESHOLD: below it every safe candidate gets progress 1
 PROB_EPS = 1e-4            # probabilities are clamped to [eps, 1 - eps] before turning them back into logits
 GEOM_OUTPUTS = 5           # geom_head per step: off-lane logit per corner (4), then the overshoot [m]
+SEGMENT_DIM = 64           # width of the segment encoder and its attention pool (step_lane="segments")
+SEGMENT_HEADS = 4
 
 
 def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -63,7 +67,8 @@ def scene_padding_mask(inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
 class Verifier(nn.Module):
 
     def __init__(self, config, depth: int = 2, num_heads: int = 6, dropout: float = 0.1, use_scene: bool = True,
-                 num_outputs: int = len(METRICS), arch: str = "plan", geom_head: bool = False):
+                 num_outputs: int = len(METRICS), arch: str = "plan", geom_head: bool = False,
+                 step_lane: str = "none"):
         """
         Args:
             config: DP config (diffusion_planner.utils.config.Config or the training args)
@@ -75,16 +80,23 @@ class Verifier(nn.Module):
             arch: "plan" (one token per candidate) or "timestep" (one token per scored state), see the module docstring
             geom_head: timestep arch: a per-step head for the dense analytic drivable-area labels (train.py
                        --analytic-weight): one off-lane logit per corner of ego's box, then the overshoot [m]
+            step_lane: timestep arch: per-step local lane features added to each state's token (lane_features.py,
+                       train.py --step-lane). "none" (w6), "scalars" (exact geometry: signed corner distances, route,
+                       lane under ego), "segments" (scalars plus an attention pool over the nearest lane segments,
+                       with the state's token as the query)
         """
         super().__init__()
         dim = config.hidden_dim
         assert num_outputs in (1, len(METRICS)), f"num_outputs must be 1 or {len(METRICS)}"
         assert arch in ARCHS, f"arch must be one of {ARCHS}"
         assert arch == "plan" or num_outputs == len(METRICS), "the timestep arch predicts the metrics (no classifier)"
+        assert step_lane in STEP_LANE_MODES, f"step_lane must be one of {STEP_LANE_MODES}"
+        assert step_lane == "none" or arch == "timestep", "step_lane features need the timestep arch"
         self.hparams = {"depth": depth, "num_heads": num_heads, "dropout": dropout, "use_scene": use_scene,
-                        "num_outputs": num_outputs, "arch": arch, "geom_head": geom_head}
+                        "num_outputs": num_outputs, "arch": arch, "geom_head": geom_head, "step_lane": step_lane}
         self.use_scene = use_scene
         self.arch = arch
+        self.step_lane = step_lane
 
         # Frozen DP modules (weights from the DP checkpoint, see from_dp_checkpoint)
         self.encoder = Diffusion_Planner_Encoder(config)
@@ -106,6 +118,16 @@ class Verifier(nn.Module):
             self.step_proj = Mlp(in_features=STEP_FEATURES, hidden_features=2 * dim, out_features=dim,
                                  act_layer=nn.GELU)
             self.time_emb = nn.Parameter(torch.randn(HORIZON + 1, dim) * 0.02)
+            if step_lane != "none":
+                self.lane_scalar_proj = Mlp(in_features=STEP_LANE_SCALARS, hidden_features=2 * dim, out_features=dim,
+                                            act_layer=nn.GELU)
+            if step_lane == "segments":
+                self.segment_proj = Mlp(in_features=SEGMENT_FEATURES, hidden_features=SEGMENT_DIM,
+                                        out_features=SEGMENT_DIM, act_layer=nn.GELU)
+                self.segment_query = nn.Linear(dim, SEGMENT_DIM)
+                self.segment_pool = nn.MultiheadAttention(SEGMENT_DIM, SEGMENT_HEADS, dropout=dropout,
+                                                          batch_first=True)
+                self.segment_out = nn.Linear(SEGMENT_DIM, dim)
 
         self.layers = nn.ModuleList([
             nn.TransformerDecoderLayer(dim, num_heads, dim_feedforward=4 * dim, dropout=dropout,
@@ -176,12 +198,31 @@ class Verifier(nn.Module):
         speed = vel.norm(dim=-1, keepdim=True)
         return torch.cat([pose, vel / 10.0, (acc / 5.0).clamp(-5.0, 5.0), speed / 10.0], dim=-1)
 
-    def _timestep_forward(self, memory: torch.Tensor, mask: torch.Tensor, candidates: torch.Tensor
-                          ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def step_tokens(self, inputs: Dict[str, torch.Tensor], candidates: torch.Tensor) -> torch.Tensor:
+        """[B, K, H + 1, D] decoder input of the timestep arch: kinematics plus time embedding (w6), plus the local lane
+        features of step_lane."""
+        x = self.step_proj(self.step_features(candidates))                 # [B, K, H + 1, D]
+        if self.step_lane == "none":
+            return x + self.time_emb
+        lane = step_lane_features(inputs, candidates, HORIZON, segments=self.step_lane == "segments")
+        tokens = x + self.time_emb + self.lane_scalar_proj(lane["scalars"])
+        if self.step_lane == "segments":
+            B, K, T, M = lane["segment_mask"].shape
+            keys = self.segment_proj(lane["segments"]).view(B * K * T, M, SEGMENT_DIM)
+            empty = lane["segment_mask"].view(B * K * T, M)
+            none = empty.all(dim=-1)                                       # no segment within reach: no lane term
+            empty = empty & ~(none[:, None] & (torch.arange(M, device=empty.device) == 0))
+            query = self.segment_query(x + self.time_emb).view(B * K * T, 1, -1)
+            pooled, _ = self.segment_pool(query, keys, keys, key_padding_mask=empty)
+            pooled = self.segment_out(pooled[:, 0]) * (~none)[:, None].float()
+            tokens = tokens + pooled.view(B, K, T, -1)
+        return tokens
+
+    def _timestep_forward(self, memory: torch.Tensor, mask: torch.Tensor, candidates: torch.Tensor,
+                          inputs: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """The timestep arch (see the module docstring): logits [B, K, len(METRICS)], aux {"progress_raw": [B, K]}."""
         B, K = candidates.shape[:2]
-        x = self.step_proj(self.step_features(candidates)) + self.time_emb # [B, K, H + 1, D]
-        x = x.flatten(0, 1)                                                # [B * K, H + 1, D]
+        x = self.step_tokens(inputs, candidates).flatten(0, 1)             # [B * K, H + 1, D]
         memory, mask = memory.repeat_interleave(K, dim=0), mask.repeat_interleave(K, dim=0)
         for layer in self.layers:
             x = layer(x, memory, memory_key_padding_mask=mask)
@@ -229,7 +270,7 @@ class Verifier(nn.Module):
         """
         memory, mask = self.encode(inputs, encoding)
         if self.arch == "timestep":
-            logits, aux = self._timestep_forward(memory, mask, candidates)
+            logits, aux = self._timestep_forward(memory, mask, candidates, inputs)
         else:
             plans = (candidates - self.plan_mean) / self.plan_std
             x = self.plan_proj(plans.flatten(start_dim=2))                 # [B, K, D]
