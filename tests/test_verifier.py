@@ -4,6 +4,7 @@ labels with a randomly initialized DP config, no nuPlan data or checkpoint.
 
     pytest tests/test_verifier.py
 """
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +15,9 @@ from torch.utils.data import DataLoader
 
 from diffusion_planner.model.diffusion_planner import Diffusion_Planner
 from diffusion_planner.scorer import train as train_module
-from diffusion_planner.scorer.dataset import INPUT_KEYS, LabelDataset, find_samples, split_by_scenario
+from diffusion_planner.scorer.dataset import (
+    INPUT_KEYS, LabelDataset, find_samples, split_by_scenario, subsample_scenarios,
+)
 from diffusion_planner.scorer.labels import LabelRecorder, load_sample, sample_dir, save_sample
 from diffusion_planner.scorer.metrics import METRICS
 from diffusion_planner.scorer.model import Verifier, scene_padding_mask
@@ -86,6 +89,18 @@ def test_split_by_scenario(tmp_path, config):
     assert {f.parent for f in train}.isdisjoint({f.parent for f in val})
     assert len({f.parent for f in val}) == 2
     assert split_by_scenario(files, val_frac=0.2, seed=0) == (train, val)
+
+
+def test_subsample_scenarios(tmp_path, config):
+    _write_dataset(tmp_path, config, n_scenarios=10, steps=2)
+    files = find_samples(tmp_path)
+
+    half = subsample_scenarios(files, 0.5, seed=1)
+    fifth = subsample_scenarios(files, 0.2, seed=1)
+    assert len({f.parent for f in half}) == 5 and len(half) == 10  # whole scenarios, all their samples
+    assert len({f.parent for f in fifth}) == 2
+    assert set(fifth) <= set(half)                                  # nested for one seed
+    assert len({f.parent for f in subsample_scenarios(files, 0.01)}) == 1
 
 
 def test_dataset_batches(tmp_path, config):
@@ -163,10 +178,11 @@ def test_scene_padding_mask_matches_encoder(config):
     assert expected.any() and not expected.all()
 
 
+@pytest.mark.parametrize("arch", ["plan", "timestep"])
 @pytest.mark.parametrize("use_scene", [True, False])
-def test_verifier_shapes_and_equivariance(config, use_scene):
+def test_verifier_shapes_and_equivariance(config, use_scene, arch):
     torch.manual_seed(0)
-    model = Verifier(config, depth=2, use_scene=use_scene).eval()
+    model = Verifier(config, depth=2, use_scene=use_scene, arch=arch).eval()
     inputs = _scene_inputs(config, batch=2)
     candidates = torch.randn(2, K, T, 4) * 10
 
@@ -179,12 +195,60 @@ def test_verifier_shapes_and_equivariance(config, use_scene):
     assert torch.allclose(model(inputs, candidates[:, perm]), logits[:, perm], atol=1e-5)
 
 
-def test_verifier_uses_precomputed_encoding(config):
-    model = Verifier(config).eval()
+@pytest.mark.parametrize("arch", ["plan", "timestep"])
+def test_verifier_uses_precomputed_encoding(config, arch):
+    model = Verifier(config, arch=arch).eval()
     inputs = _scene_inputs(config, batch=2)
     candidates = torch.randn(2, K, T, 4)
     encoding = model.encoder(inputs)["encoding"]
     assert torch.allclose(model(inputs, candidates, encoding=encoding), model(inputs, candidates), atol=1e-5)
+
+
+def test_timestep_step_features(config):
+    from diffusion_planner.scorer.model import HORIZON, STEP_FEATURES
+    model = Verifier(config, arch="timestep")
+    plans = torch.zeros(1, 1, T, 4)
+    plans[..., 0] = 0.5 * torch.arange(1, T + 1)          # 5 m/s straight ahead, poses every 0.1 s
+    plans[..., 2] = 1.0
+    f = model.step_features(plans)
+    assert f.shape == (1, 1, HORIZON + 1, STEP_FEATURES)
+    assert torch.allclose(f[0, 0, :, 4], torch.full((HORIZON + 1,), 0.5))  # vx / 10 at every state
+    assert torch.allclose(f[0, 0, :, 6:8], torch.zeros(HORIZON + 1, 2))   # no acceleration
+    # Only the first HORIZON poses are read
+    plans[:, :, HORIZON:] = 1e3
+    assert torch.allclose(model.step_features(plans), f)
+
+
+def test_timestep_any_step_and_progress(config):
+    """One failing step fails an any-step metric; progress is gated and normalized across candidates."""
+    from diffusion_planner.scorer.model import ANY_STEP, HORIZON, PROGRESS, PROGRESS_SCALE
+    torch.manual_seed(0)
+    model = Verifier(config, arch="timestep").eval()
+    inputs = _scene_inputs(config, batch=1)
+    candidates = torch.randn(1, 3, T, 4)
+    with torch.no_grad():
+        model.step_head.weight.zero_()
+        model.step_head.bias.fill_(-20.0)                  # every step passes, speed-limit compliance ~0
+        logits = model(inputs, candidates)
+        assert (torch.sigmoid(logits[0, :, ANY_STEP]) > 0.99).all()
+
+        # Step outputs that depend on the token: make step 7 of every candidate fail on drivable area (index 1)
+        model.time_emb.zero_()
+        model.time_emb[7, 0] = 1.0
+        model.layers = torch.nn.ModuleList()               # tokens reach the head unchanged (after the norm)
+        model.step_proj = torch.nn.Identity()
+        model.step_features = lambda c: torch.zeros(*c.shape[:2], HORIZON + 1, model.time_emb.shape[1])
+        model.norm = torch.nn.Identity()
+        model.step_head.weight[1, 0] = 40.0
+        logits = model(inputs, candidates)
+        assert (torch.sigmoid(logits[0, :, 1]) < 0.01).all()   # drivable fails
+        assert (torch.sigmoid(logits[0, :, 0]) > 0.99).all()   # collision still passes
+
+        # Progress: gated by the (now failing) drivable metric, so every candidate is unsafe -> 0 progress
+        model.progress_head.bias.fill_(1.0)
+        _, aux = model(inputs, candidates, return_aux=True)
+        assert torch.allclose(aux["progress_raw"], torch.full((1, 3), PROGRESS_SCALE * float(torch.nn.functional.softplus(torch.tensor(1.0)))))
+        assert (torch.sigmoid(model(inputs, candidates)[0, :, PROGRESS]) < 0.01).all()
 
 
 def test_load_dp_weights_and_freeze(config):
@@ -253,6 +317,31 @@ def test_train_overfits_small_set(tmp_path, config):
     assert reloaded["all/verifier/regret"] == pytest.approx(best["all/verifier/regret"], abs=1e-6)
 
 
+def test_train_timestep_overfits_small_set(tmp_path, config):
+    _write_dataset(tmp_path / "labels", config, n_scenarios=4, steps=4)
+    args = train_module.parse_args([
+        "--data", str(tmp_path / "labels"), "--out", str(tmp_path / "run"), "--overfit", "16", "--arch", "timestep",
+        "--epochs", "40", "--batch-size", "8", "--lr", "1e-3", "--num-workers", "0", "--device", "cpu",
+        "--rank-weight", "0.5",
+    ])
+    best = train_module.run(args, config=config)
+    assert best["all/verifier/regret"] < best["all/first/regret"]
+    assert best["all/verifier/regret"] < best["all/random/regret"]
+
+    checkpoint = torch.load(tmp_path / "run" / "best.pt", weights_only=False)
+    assert checkpoint["hparams"]["arch"] == "timestep"
+    model = Verifier(config, **checkpoint["hparams"])
+    model.load_state_dict(checkpoint["state_dict"])
+    loader = DataLoader(LabelDataset(find_samples(tmp_path / "labels")[:16]), batch_size=8)
+    reloaded = train_module.evaluate(model, loader, "oracle", "cpu")
+    assert reloaded["all/verifier/regret"] == pytest.approx(best["all/verifier/regret"], abs=1e-6)
+
+
+def test_timestep_rejects_classifier(config):
+    with pytest.raises(AssertionError):
+        Verifier(config, arch="timestep", num_outputs=1)
+
+
 def test_label_stats(tmp_path, config):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -271,3 +360,87 @@ def test_label_stats(tmp_path, config):
     assert row["random_regret"] == pytest.approx(1 / 3)
     assert row["cv_top1"] == 0.0 and row["cv_agreement"] == 0.0 # PDM's view ties 0 and 2 and keeps 0
     assert row["pass_no_at_fault_collision"] == pytest.approx(2 / 3)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Dense analytic drivable-area labels
+
+
+def _straight_lanes(batch: int, lane_num: int, lane_len: int, centers_y=(0.0, 3.5), width=3.5) -> torch.Tensor:
+    """Normalized DP lane inputs: straight lanes along x from -20 m to 80 m at the given y, the rest padding."""
+    lanes = torch.zeros(batch, lane_num, lane_len, 12)
+    x = torch.linspace(-20.0, 80.0, lane_len)
+    for i, y in enumerate(centers_y):
+        lanes[:, i, :, 0] = (x - 10.0) / 20.0
+        lanes[:, i, :, 1] = y / 20.0
+        lanes[:, i, :, 2] = (x[1] - x[0]) / 20.0
+        lanes[:, i, :, 5] = width / 2 / 20.0
+        lanes[:, i, :, 7] = -width / 2 / 20.0
+    return lanes
+
+
+def test_corner_lane_distance_torch_matches_numpy():
+    from diffusion_planner.scorer.analytic_metrics import corner_lane_distance, corner_lane_distance_torch
+
+    g = torch.Generator().manual_seed(0)
+    lanes = _straight_lanes(3, 10, 20)
+    lanes[1, 1] = 0.0                                          # sample 1: one lane only
+    lanes[2] = lanes[2] + 0.01 * torch.randn(lanes[2].shape, generator=g) * (lanes[2] != 0)  # wobbly boundaries
+    plans = torch.zeros(3, 5, 80, 4)
+    t = torch.linspace(0.1, 8.0, 80)
+    plans[..., 0] = t * 8.0
+    plans[..., 1] = t[None, None] * torch.tensor([-1.0, -0.3, 0.0, 0.5, 1.5])[None, :, None]  # drift sideways
+    plans[..., 2] = 1.0
+
+    dist_t = corner_lane_distance_torch(lanes, plans, horizon=40)
+    assert dist_t.shape == (3, 5, 41, 4)
+    for b in range(3):
+        dist_np = corner_lane_distance(lanes[b].numpy(), plans[b].numpy(), horizon=40)
+        np.testing.assert_allclose(dist_t[b].numpy(), dist_np, atol=1e-3)
+    # The straight candidate stays inside; the hardest drift leaves the two-lane road
+    assert (dist_t[0, 2] == 0).all() and (dist_t[0, 4] > 0).any()
+
+
+def test_analytic_targets_and_loss():
+    from diffusion_planner.scorer.model import ANY_STEP, GEOM_OUTPUTS
+
+    lanes = _straight_lanes(2, 10, 20)
+    lanes[1] = 0.0                                             # a scene without lanes is skipped
+    plans = torch.zeros(2, 3, 80, 4)
+    plans[..., 0] = torch.linspace(0.8, 64.0, 80)
+    plans[:, 1, :, 1] = torch.linspace(0.0, 12.0, 80)          # leaves the road
+    plans[..., 2] = 1.0
+    targets = train_module.analytic_targets({"inputs": {"lanes": lanes}, "candidates": plans})
+    assert targets["valid"].tolist() == [True, False]
+    assert targets["step_off"][0, 0].sum() == 0 and targets["step_off"][0, 1, -1] == 1
+    assert (targets["margin"][0] <= train_module.MARGIN_CLIP).all()
+
+    aux = {"step_logits": torch.zeros(2, 3, 41, len(ANY_STEP) + 1, requires_grad=True),
+           "geom": torch.zeros(2, 3, 41, GEOM_OUTPUTS, requires_grad=True)}
+    assert train_module.analytic_loss({"step_logits": aux["step_logits"]}, targets) > 0   # step term alone
+    loss = train_module.analytic_loss(aux, targets, corner_weight=1.0, margin_weight=0.5)
+    loss.backward()
+    assert torch.isfinite(loss) and aux["step_logits"].grad[1].abs().sum() == 0   # invalid scene: no gradient
+
+
+def test_analytic_pretrain_then_finetune(tmp_path, config):
+    _write_dataset(tmp_path / "labels", config, n_scenarios=4, steps=4)
+    common = ["--data", str(tmp_path / "labels"), "--overfit", "16", "--arch", "timestep", "--batch-size", "8",
+              "--lr", "1e-3", "--num-workers", "0", "--device", "cpu"]
+
+    pre = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "pre"), "--analytic-only", "--epochs", "6"]), config=config)
+    log = [json.loads(line) for line in (tmp_path / "pre" / "log.jsonl").read_text().splitlines()]
+    assert log[-1]["analytic/loss"] < log[0]["analytic/loss"]
+    assert not torch.load(tmp_path / "pre" / "best.pt", weights_only=False)["hparams"]["geom_head"]
+
+    # Plain fine-tuning from the pretrained weights, and the multi-task variant with the optional geom_head terms
+    fine = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "fine"), "--epochs", "2", "--init-from", str(tmp_path / "pre" / "best.pt")]),
+        config=config)
+    assert "drivable/pair_acc" in fine and "analytic/loss" not in fine
+    multi = train_module.run(train_module.parse_args(
+        common + ["--out", str(tmp_path / "multi"), "--epochs", "2", "--analytic-weight", "0.3",
+                  "--corner-weight", "0.5", "--margin-weight", "0.5"]), config=config)
+    assert "analytic/loss" in multi
+    assert torch.load(tmp_path / "multi" / "best.pt", weights_only=False)["hparams"]["geom_head"]

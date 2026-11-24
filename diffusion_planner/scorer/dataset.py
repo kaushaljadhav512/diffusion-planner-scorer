@@ -41,6 +41,20 @@ def split_by_scenario(files: Sequence[Path], val_frac: float = 0.1, seed: int = 
     return [Path(f) for f in files if Path(f).parent.name not in val], [Path(f) for f in files if Path(f).parent.name in val]
 
 
+def subsample_scenarios(files: Sequence[Path], frac: float, seed: int = 0) -> List[Path]:
+    """
+    The samples of a random fraction of the scenarios (learning curve). For one seed the subsets are nested: a
+    smaller fraction's scenarios are a subset of a larger one's.
+
+    Returns:
+        files of round(frac * n_scenarios) scenarios, at least one
+    """
+    scenarios = sorted({Path(f).parent.name for f in files})
+    random.Random(seed).shuffle(scenarios)
+    keep = set(scenarios[:max(1, round(frac * len(scenarios)))])
+    return [Path(f) for f in files if Path(f).parent.name in keep]
+
+
 class LabelDataset(Dataset):
     """
     Items:
@@ -48,6 +62,8 @@ class LabelDataset(Dataset):
         candidates:      [K, T, 4] ego plans, ego frame, unnormalized (the verifier normalizes them)
         metrics_oracle:  [K, 7] per-metric labels with logged futures
         metrics_cv:      [K, 7] the same with constant-velocity forecasts (PDM selection, as a baseline)
+        progress_oracle: [K] raw progress along the centerline [m] behind metrics_oracle's normalized progress
+        progress_cv:     [K] the same for metrics_cv
     """
 
     def __init__(self, files: Sequence[Path]):
@@ -63,4 +79,6 @@ class LabelDataset(Dataset):
             "candidates": torch.from_numpy(sample["candidates"]).float(),
             "metrics_oracle": torch.from_numpy(sample["metrics_oracle"]).float(),
             "metrics_cv": torch.from_numpy(sample["metrics_cv"]).float(),
+            "progress_oracle": torch.from_numpy(sample["progress_oracle"]).float(),
+            "progress_cv": torch.from_numpy(sample["progress_cv"]).float(),
         }

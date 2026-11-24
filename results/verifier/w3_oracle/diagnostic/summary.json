@@ -1,0 +1,20 @@
+{
+  "ckpt": "/home/shubham/IDL_project/diffusion-planner-scorer/results/verifier/w3_oracle/best.pt",
+  "labels": "oracle",
+  "n": 5970,
+  "regret": {
+    "verifier": 0.03619126230478287,
+    "pdm_sl": 0.011420308612287045
+  },
+  "top1": {
+    "verifier": 0.828140703517588,
+    "pdm_sl": 0.931323283082077
+  },
+  "overlap": {
+    "both_hit": 0.7897822445561139,
+    "verifier_miss_pdm_hit": 0.14154103852596314,
+    "verifier_hit_pdm_miss": 0.03835845896147404,
+    "both_miss": 0.03031825795644891,
+    "regret_from_verifier_only_misses": 0.025585850599023765
+  }
+}

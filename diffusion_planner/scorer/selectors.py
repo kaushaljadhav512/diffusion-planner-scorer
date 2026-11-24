@@ -165,3 +165,26 @@ def gather_selected(candidates: torch.Tensor, indices: torch.Tensor) -> torch.Te
         selected: [B, P, T, 4], same layout as model(inputs)[1]["prediction"]
     """
     return candidates[torch.arange(candidates.shape[0], device=candidates.device), indices]
+
+
+class VerifierSelector(AbstractSelector):
+    """
+    Learned verifier (diffusion_planner.scorer.model.Verifier): the candidate with the highest predicted combined
+    score; ties go to the lowest index, as in PDMSelector. Loads the checkpoint once.
+    """
+
+    def __init__(self, ckpt_path: str, args_file: str, device: str = "cuda"):
+        from diffusion_planner.scorer.model import Verifier
+
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            device = "cpu"
+        self._device = device
+        self._model = Verifier.load(ckpt_path, args_file, device=device)
+
+    @torch.no_grad()
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        assert context.inputs is not None, "VerifierSelector needs the normalized model inputs"
+        inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
+        scores = self._model.score(inputs, candidates[:, :, 0].to(self._device).float())   # [B, K]
+        best = scores.max(dim=1, keepdim=True).values
+        return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
