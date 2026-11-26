@@ -7,7 +7,7 @@
 #                pdm_closed  PDM-Closed (rule-based reference)
 #     split:     val14 | test14-hard | test14-random | test14-hard-100 (scripts/make_subset_filter.py)
 #                train-labels-2k (scripts/make_train_filter.py; label generation)
-#     challenge: nr (non-reactive agents) | r (reactive agents)
+#     challenge: nr (non-reactive agents) | r (reactive agents) | ol (open loop: logged ego, OLS metrics)
 #
 # Env knobs:
 #   SMOKE=N        only simulate the first N scenarios of the split (quick pipeline check)
@@ -23,6 +23,8 @@
 #                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
 #                    oracle: PDM with logged futures, nr only
 #                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
+#   VERIFIER_TAG=t verifier only: appended to the run name (dp_k<K>_verifier_<t>...) so runs of different checkpoints
+#                  are kept apart, e.g. VERIFIER_TAG=s1
 #   LABEL_DIR=d    label output dir (default $NUPLAN_HOME/labels/<split>); LABEL_DRIVE=pdm | pdm_sl (default pdm_sl)
 #   NOISE=f        initial diffusion noise std (default 0.5, upstream's value)
 #   NOISE=a,b      mixed: candidate 0 at std a (a=0.5 is vanilla DP's own plan), candidates 1..K-1 at std b
@@ -34,13 +36,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/../setup/config.env"
 
 PLANNER="${1:?planner: dp | dp_k | pdm_closed}"
 SPLIT="${2:?split: val14 | test14-hard | test14-random}"
-CH="${3:?challenge: nr | r}"
+CH="${3:?challenge: nr | r | ol}"
 shift 3
 
 case "$CH" in
   nr) CHALLENGE=closed_loop_nonreactive_agents ;;
   r)  CHALLENGE=closed_loop_reactive_agents ;;
-  *)  echo "challenge must be nr or r"; exit 1 ;;
+  ol) CHALLENGE=open_loop_boxes ;;
+  *)  echo "challenge must be nr, r or ol"; exit 1 ;;
 esac
 # Val14 and train-* (scripts/make_train_filter.py) scenarios live in trainval/; Test14-* come from the test DBs.
 case "$SPLIT" in
@@ -110,6 +113,7 @@ case "$PLANNER" in
       *)   NOISE_FIRST=null; NOISE_REST="$NOISE" ;;
     esac
     NAME="dp_k${K}_${SELECTOR}"
+    [ "$SELECTOR" != verifier ] || [ -z "${VERIFIER_TAG:-}" ] || NAME="${NAME}_${VERIFIER_TAG}"
     [ "$NOISE" = "0.5" ] || NAME="${NAME}_noise${NOISE/,/-}"
     [ "$SEED" = "0" ] || NAME="${NAME}_seed${SEED}"
     PLANNER_ARGS=(
