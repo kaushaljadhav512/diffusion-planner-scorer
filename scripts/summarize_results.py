@@ -31,7 +31,7 @@ PAPER = {
     ("pdm_closed", "test14-hard", "nr"): 65.08, ("pdm_closed", "test14-hard", "r"): 75.19,
     ("pdm_closed", "test14-random", "nr"): 90.05, ("pdm_closed", "test14-random", "r"): 91.63,
 }
-CHALLENGE_SHORT = {"closed_loop_nonreactive_agents": "nr", "closed_loop_reactive_agents": "r"}
+CHALLENGE_SHORT = {"closed_loop_nonreactive_agents": "nr", "closed_loop_reactive_agents": "r", "open_loop_boxes": "ol"}
 METRICS = [
     "no_ego_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance",
     "ego_is_making_progress", "time_to_collision_within_bound", "speed_limit_compliance",
