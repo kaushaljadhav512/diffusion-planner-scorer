@@ -166,6 +166,53 @@ class PDMExpertProgressSelector(PDMSelector):
         return combined_score_expert(metrics, progress, expert)
 
 
+class PDMEstimatedProgressSelector(PDMSelector):
+    """
+    PDMExpertProgressSelector with the human driver's progress estimated instead of read from the log, so it can
+    run at test time. Training-free estimates of the human's progress over the scored horizon:
+
+        median  median raw progress of the K candidates (DP imitates human drivers)
+        first   raw progress of candidate 0; with NOISE=0.5,1.5 that is vanilla DP's own plan
+        cv      constant velocity: ego's current longitudinal speed x horizon
+        ca      constant acceleration: v t + a t^2 / 2, or the stopping distance v^2 / (2 |a|) if ego stops sooner
+
+    Works in reactive simulation too (nothing is read from the log).
+    """
+
+    ESTIMATES = ("median", "first", "cv", "ca")
+
+    def __init__(self, estimate: str = "median", map_radius: float = 50.0, proposal_poses: int = 40):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        assert estimate in self.ESTIMATES, f"estimate must be one of {self.ESTIMATES}, got {estimate}"
+        self._estimate = estimate
+        self.last_estimate = None
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        self.last_estimate = self.estimate_progress(planner_input, progress)
+        return combined_score_expert(metrics, progress, self.last_estimate)
+
+    def estimate_progress(self, planner_input: "PlannerInput", progress) -> float:
+        """Estimated progress [m] of the human driver over the scored horizon."""
+        import numpy as np
+
+        if self._estimate == "median":
+            return float(np.median(progress))
+        if self._estimate == "first":
+            return float(progress[0])
+        horizon_s = self._scorer.horizon_poses * self._scorer._proposal_sampling.interval_length
+        car = planner_input.history.current_state[0].dynamic_car_state
+        v, a = max(float(car.rear_axle_velocity_2d.x), 0.0), float(car.rear_axle_acceleration_2d.x)
+        if self._estimate == "cv" or a >= 0.0:
+            return v * horizon_s + (0.5 * a * horizon_s ** 2 if self._estimate == "ca" else 0.0)
+        stop_s = v / -a
+        return v * v / (2.0 * -a) if stop_s < horizon_s else v * horizon_s + 0.5 * a * horizon_s ** 2
+
+
 class OracleSelector(PDMSelector):
     """
     Upper bound for the headroom run: PDMSelector, but the other agents follow their logged futures instead of
