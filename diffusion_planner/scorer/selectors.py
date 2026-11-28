@@ -213,39 +213,6 @@ class PDMEstimatedProgressSelector(PDMSelector):
         return v * v / (2.0 * -a) if stop_s < horizon_s else v * horizon_s + 0.5 * a * horizon_s ** 2
 
 
-class VerifierExpertProgressSelector(VerifierSelector):
-    """
-    VerifierSelector with progress scored against an estimate of the human driver's progress instead of PDM's
-    normalization: progress = min(1, max(raw, 2 m) / max(E, 2 m)) on the verifier's own predicted raw progress, no
-    safety gating, and ego_is_making_progress as a multiplier (as in combined_score_expert). E = ego's current
-    longitudinal speed x the scored horizon (constant velocity, as PDMEstimatedProgressSelector's "cv"). The safety
-    and other metric predictions are the verifier's, unchanged; no retraining.
-    """
-
-    @torch.no_grad()
-    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
-        from diffusion_planner.scorer.metrics import EXPERT_PROGRESS_THRESHOLD, MIN_PROGRESS_RATIO, combined_score
-        from diffusion_planner.scorer.model import HORIZON
-
-        assert context.inputs is not None and context.planner_input is not None, \
-            "VerifierExpertProgressSelector needs the model inputs and the PlannerInput"
-        inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
-        out, aux = self._model(inputs, candidates[:, :, 0].to(self._device).float(), return_aux=True)
-        probs = torch.sigmoid(out).clone()                                  # [B, K, 7]
-        raw = aux["progress_raw"]                                           # [B, K] metres
-
-        car = context.planner_input.history.current_state[0].dynamic_car_state
-        expert = max(float(car.rear_axle_velocity_2d.x), 0.0) * HORIZON * 0.1
-        self.last_estimate = expert
-        thr = EXPERT_PROGRESS_THRESHOLD
-        ratio = torch.clamp(torch.clamp(raw, min=thr) / max(expert, thr), max=1.0)
-        ratio = torch.where(raw < -thr, torch.zeros_like(ratio), ratio)
-        probs[..., 3] = ratio
-        scores = combined_score(probs) * (ratio >= MIN_PROGRESS_RATIO).float()  # [B, K]
-        best = scores.max(dim=1, keepdim=True).values
-        return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
-
-
 class OracleSelector(PDMSelector):
     """
     Upper bound for the headroom run: PDMSelector, but the other agents follow their logged futures instead of
@@ -356,5 +323,38 @@ class VerifierSelector(AbstractSelector):
         assert context.inputs is not None, "VerifierSelector needs the normalized model inputs"
         inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
         scores = self._model.score(inputs, candidates[:, :, 0].to(self._device).float())   # [B, K]
+        best = scores.max(dim=1, keepdim=True).values
+        return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
+
+
+class VerifierExpertProgressSelector(VerifierSelector):
+    """
+    VerifierSelector with progress scored against an estimate of the human driver's progress instead of PDM's
+    normalization: progress = min(1, max(raw, 2 m) / max(E, 2 m)) on the verifier's own predicted raw progress, no
+    safety gating, and ego_is_making_progress as a multiplier (as in combined_score_expert). E = ego's current
+    longitudinal speed x the scored horizon (constant velocity, as PDMEstimatedProgressSelector's "cv"). The safety
+    and other metric predictions are the verifier's, unchanged; no retraining.
+    """
+
+    @torch.no_grad()
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        from diffusion_planner.scorer.metrics import EXPERT_PROGRESS_THRESHOLD, MIN_PROGRESS_RATIO, combined_score
+        from diffusion_planner.scorer.model import HORIZON
+
+        assert context.inputs is not None and context.planner_input is not None, \
+            "VerifierExpertProgressSelector needs the model inputs and the PlannerInput"
+        inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
+        out, aux = self._model(inputs, candidates[:, :, 0].to(self._device).float(), return_aux=True)
+        probs = torch.sigmoid(out).clone()                                  # [B, K, 7]
+        raw = aux["progress_raw"]                                           # [B, K] metres
+
+        car = context.planner_input.history.current_state[0].dynamic_car_state
+        expert = max(float(car.rear_axle_velocity_2d.x), 0.0) * HORIZON * 0.1
+        self.last_estimate = expert
+        thr = EXPERT_PROGRESS_THRESHOLD
+        ratio = torch.clamp(torch.clamp(raw, min=thr) / max(expert, thr), max=1.0)
+        ratio = torch.where(raw < -thr, torch.zeros_like(ratio), ratio)
+        probs[..., 3] = ratio
+        scores = combined_score(probs) * (ratio >= MIN_PROGRESS_RATIO).float()  # [B, K]
         best = scores.max(dim=1, keepdim=True).values
         return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
