@@ -56,3 +56,42 @@ def test_gather_selected():
 
     assert selected.shape == (B, P, T, 4)
     assert torch.equal(selected[:, 0, 0, 0], torch.tensor([0., 105., 207.]))
+
+
+class _StubScorer:
+    """Stands in for PDMCandidateScorer: 3 candidates, all safe, raw progress 2, 5 and 12 m."""
+
+    def score(self, planner_input, ego_plans):
+        self.scored = len(ego_plans)
+
+    def last_metrics(self):
+        import numpy as np
+        return {"multi_metrics": np.ones((3, 3)),
+                "weighted_metrics": np.array([[2 / 12, 5 / 12, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
+                "progress_raw": np.array([2.0, 5.0, 12.0])}
+
+    def speed_limit_compliance(self):
+        import numpy as np
+        return np.ones(3)
+
+    def expert_progress(self, scenario, iteration):
+        return 5.0
+
+
+def test_pdm_expert_progress_selector_caps_progress_at_the_human():
+    from types import SimpleNamespace
+
+    from diffusion_planner.scorer.selectors import PDMExpertProgressSelector
+
+    # Bypass __init__ (it builds PDM's nuPlan scorer); the stub supplies what _score reads
+    selector = object.__new__(PDMExpertProgressSelector)
+    selector._scorer, selector.last_scores = _StubScorer(), None
+    candidates = torch.zeros(1, 3, P, T, 4)
+    context = SelectionContext(planner_input=SimpleNamespace(iteration=SimpleNamespace(index=0)), scenario=object())
+    pick = selector.select(candidates, context)
+
+    # PDM's normalization would prefer the 12 m candidate. Against a human progress of 5 m, the 5 m and 12 m
+    # candidates both score progress 1 and tie, so the lowest index of the two wins; the 2 m one scores 0.4.
+    scores = selector.last_scores
+    assert abs(scores[1] - scores[2]) < 1e-9 and scores[0] < scores[1]
+    assert int(pick[0]) == 1

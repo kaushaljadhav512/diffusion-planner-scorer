@@ -137,6 +137,35 @@ class PDMSpeedLimitSelector(PDMSelector):
         return combined_score(from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance()))
 
 
+class PDMExpertProgressSelector(PDMSelector):
+    """
+    PDMSpeedLimitSelector's constant-velocity metrics with nuPlan's progress definition: each candidate's progress
+    relative to the human driver's logged progress over the same horizon, plus ego_is_making_progress as a
+    multiplicative metric (combined_score_expert). The other agents keep their constant-velocity forecasts, so this
+    is OracleExpertProgressSelector without logged agent futures: the score a selector would reach with a perfect
+    prediction of the human driver's progress. Non-reactive simulation only (the human's progress is read from the
+    log).
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        self._scenario = None
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        assert context.scenario is not None, "PDMExpertProgressSelector needs the scenario (logged human progress)"
+        self._scenario = context.scenario
+        return super().select(candidates, context)
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        expert = self._scorer.expert_progress(self._scenario, planner_input.iteration.index)
+        return combined_score_expert(metrics, progress, expert)
+
+
 class OracleSelector(PDMSelector):
     """
     Upper bound for the headroom run: PDMSelector, but the other agents follow their logged futures instead of
