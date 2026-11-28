@@ -24,7 +24,8 @@
 #                    pdm_sl_ep: pdm_sl's constant-velocity metrics with progress relative to the human driver's logged
 #                               progress + ego_is_making_progress (oracle_ep without logged agent futures), nr only
 #                    verifier_ep_cv: verifier (VERIFIER_CKPT, VERIFIER_TAG) with progress against constant-velocity E
-#                               instead of PDM's normalization (no retraining)
+#                               instead of PDM's normalization; VERIFIER_RAW=predicted (its raw-progress head, default) |
+#                               computed (route progress from the plan, for checkpoints trained with --progress-mode ep_cv)
 #                    pdm_sl_ep_median | pdm_sl_ep_first | pdm_sl_ep_cv | pdm_sl_ep_ca: pdm_sl_ep with the human's progress
 #                               estimated without the log: median of the K candidates' progress, candidate 0's (vanilla DP
 #                               with NOISE=0.5,1.5), constant velocity, constant acceleration
@@ -135,6 +136,7 @@ case "$PLANNER" in
           "++planner.diffusion_planner_k.selector.ckpt_path=$DP_ROOT/${VERIFIER_CKPT:-results/verifier/w3_oracle/best.pt}"
           "++planner.diffusion_planner_k.selector.args_file=$DP_ROOT/checkpoints/args.json"
           "++planner.diffusion_planner_k.selector.device=$DP_DEVICE"
+          "++planner.diffusion_planner_k.selector.raw_source=${VERIFIER_RAW:-predicted}"
         ) ;;
       *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | pdm_sl_ep | pdm_sl_ep_<median|first|cv|ca> | oracle | oracle_sl | oracle_ep | label | verifier | verifier_ep_cv)"; exit 1 ;;
     esac

@@ -6,8 +6,9 @@ Verifier dataset over the label files of diffusion_planner.scorer.labels (task 2
 """
 import random
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -66,8 +67,11 @@ class LabelDataset(Dataset):
         progress_cv:     [K] the same for metrics_cv
     """
 
-    def __init__(self, files: Sequence[Path]):
+    def __init__(self, files: Sequence[Path], sidecar: Optional[Path] = None):
+        """sidecar: dir from scripts/make_epcv_sidecar.py (same layout as the labels); adds ego_speed [] (the
+        simulated ego's speed, m/s) and progress_route [K] (computed progress along the route, m) to every item."""
         self.files = [Path(f) for f in files]
+        self.sidecar = Path(sidecar).expanduser() if sidecar is not None else None
 
     def __len__(self) -> int:
         return len(self.files)
@@ -81,4 +85,12 @@ class LabelDataset(Dataset):
             "metrics_cv": torch.from_numpy(sample["metrics_cv"]).float(),
             "progress_oracle": torch.from_numpy(sample["progress_oracle"]).float(),
             "progress_cv": torch.from_numpy(sample["progress_cv"]).float(),
+            **self._sidecar(self.files[index]),
         }
+
+    def _sidecar(self, path: Path) -> Dict[str, torch.Tensor]:
+        if self.sidecar is None:
+            return {}
+        z = np.load(self.sidecar / path.parent.name / path.name)
+        return {"ego_speed": torch.tensor(float(z["ego_speed"])),
+                "progress_route": torch.from_numpy(z["progress_route"]).float()}

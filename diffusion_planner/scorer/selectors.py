@@ -330,31 +330,46 @@ class VerifierSelector(AbstractSelector):
 class VerifierExpertProgressSelector(VerifierSelector):
     """
     VerifierSelector with progress scored against an estimate of the human driver's progress instead of PDM's
-    normalization: progress = min(1, max(raw, 2 m) / max(E, 2 m)) on the verifier's own predicted raw progress, no
-    safety gating, and ego_is_making_progress as a multiplier (as in combined_score_expert). E = ego's current
-    longitudinal speed x the scored horizon (constant velocity, as PDMEstimatedProgressSelector's "cv"). The safety
-    and other metric predictions are the verifier's, unchanged; no retraining.
+    normalization: progress = min(1, max(raw, 2 m) / max(E, 2 m)), no safety gating, and ego_is_making_progress as a
+    multiplier (as in combined_score_expert). E = ego's current longitudinal speed x 4 s (constant velocity, as
+    PDMEstimatedProgressSelector's "cv"). The other metrics are the verifier's predictions.
+
+    raw_source: "predicted" = the verifier's own raw-progress head (any checkpoint, no retraining);
+                "computed" = progress along the route from the plan (route_progress), as a model trained with
+                --progress-mode ep_cv was trained on
     """
+
+    def __init__(self, ckpt_path: str, args_file: str, device: str = "cuda", raw_source: str = "predicted"):
+        super().__init__(ckpt_path=ckpt_path, args_file=args_file, device=device)
+        assert raw_source in ("predicted", "computed"), f"raw_source must be predicted or computed, got {raw_source}"
+        self._raw_source = raw_source
+        self.last_estimate = None
 
     @torch.no_grad()
     def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
-        from diffusion_planner.scorer.metrics import EXPERT_PROGRESS_THRESHOLD, MIN_PROGRESS_RATIO, combined_score
-        from diffusion_planner.scorer.model import HORIZON
+        from diffusion_planner.scorer.metrics import combined_score
+        from diffusion_planner.scorer.route_progress import (constant_velocity_expert, expert_progress_score,
+                                                             route_progress)
 
         assert context.inputs is not None and context.planner_input is not None, \
             "VerifierExpertProgressSelector needs the model inputs and the PlannerInput"
         inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
-        out, aux = self._model(inputs, candidates[:, :, 0].to(self._device).float(), return_aux=True)
+        plans = candidates[:, :, 0].to(self._device).float()
+        out, aux = self._model(inputs, plans, return_aux=True)
         probs = torch.sigmoid(out).clone()                                  # [B, K, 7]
-        raw = aux["progress_raw"]                                           # [B, K] metres
+        if self._raw_source == "predicted":
+            raw = aux["progress_raw"]                                       # [B, K] metres
+        else:
+            rl, pl = context.inputs["route_lanes"].cpu().numpy(), candidates[:, :, 0].cpu().numpy()
+            raw = torch.stack([torch.from_numpy(route_progress(rl[b], pl[b])).float() for b in range(len(pl))])
+            raw = raw.to(probs.device)
 
         car = context.planner_input.history.current_state[0].dynamic_car_state
-        expert = max(float(car.rear_axle_velocity_2d.x), 0.0) * HORIZON * 0.1
-        self.last_estimate = expert
-        thr = EXPERT_PROGRESS_THRESHOLD
-        ratio = torch.clamp(torch.clamp(raw, min=thr) / max(expert, thr), max=1.0)
-        ratio = torch.where(raw < -thr, torch.zeros_like(ratio), ratio)
+        speed = torch.full((probs.shape[0],), float(car.rear_axle_velocity_2d.x), device=probs.device)
+        expert = constant_velocity_expert(speed)
+        self.last_estimate = float(expert[0])
+        ratio, making = expert_progress_score(raw, expert)
         probs[..., 3] = ratio
-        scores = combined_score(probs) * (ratio >= MIN_PROGRESS_RATIO).float()  # [B, K]
+        scores = combined_score(probs) * making                             # [B, K]
         best = scores.max(dim=1, keepdim=True).values
         return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
