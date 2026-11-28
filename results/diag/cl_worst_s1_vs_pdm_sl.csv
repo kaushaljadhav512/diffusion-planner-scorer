@@ -1,0 +1,16 @@
+scenario,type,s1,pdm_sl,first,w6,mean_loss,s1_causes
+e94b99e48b355de6,waiting_for_pedestrian_to_cross,  0   0   0, 97  97  96, 94  94  94,  0   0  65,-96.6,collision (gate)
+159942fd13675580,waiting_for_pedestrian_to_cross,  0   0   0, 96  96  96,  0   0   0,  0   0   0,-96.3,collision (gate)
+0cd6cff135c25fa9,starting_left_turn, 88   0   0, 90  90  87, 97  97  97,  0   0   0,-59.9,"drivable (gate), progress"
+40e1f34c92255a0e,starting_straight_traffic_light_intersection_traversal,  0   0  85, 92  92  56,  0   0  57, 84   0  84,-51.6,collision (gate)
+2754fbd9c2445dce,changing_lane,  0   0   0, 98   0   0, 98  98  98,  0   0  98,-32.6,drivable (gate)
+f7700356e6d85410,following_lane_with_lead, 82  85  86,100 100 100, 85   0  86, 85  87  84,-15.8,comfort
+3e673b48bbf15727,high_lateral_acceleration, 56  56  56, 69  69  69, 56  69  69, 56  56  56,-12.5,comfort
+9fd5ec2b453d556e,starting_straight_traffic_light_intersection_traversal, 88  88  88,100 100 100, 88  88  88, 88  88  88,-12.5,comfort
+b327b4d0432a51a1,stopping_with_lead, 88  88  88,100 100 100,100 100 100,100  88  88,-12.5,comfort
+0795bcd734235cf5,traversing_pickup_dropoff, 68  34  68, 69  69  69, 69  69  69,100  68  34,-12.1,"collision (gate), speed_limit"
+a22b2b1e04595a0e,high_magnitude_speed, 90  78  78, 89  89  90, 88  88  76, 90  77  78,-7.9,comfort
+ebf09047e62a5fb8,stationary_in_traffic, 98  98  86,100 100 100,100 100  99, 97 100  98,-6.1,"comfort, progress"
+0b7bb38b72ff5034,starting_right_turn, 97  97  67, 84  96  96, 93  92  92, 84  95  81,-5.6,ttc
+6ff0d0bb90d852b9,high_lateral_acceleration, 87  99  88, 96  96  96, 97  97  97, 88  88  88,-4.9,comfort
+6d0875dbcec45b3a,high_lateral_acceleration,100 100  88,100 100 100,100  84 100,100  88  88,-4.2,comfort

@@ -1,0 +1,19 @@
+validation samples: 5970 (199 scenarios)
+computed vs PDM raw progress on validation: MAE 0.68 m, median 0.29 m
+--- runs/s1_step_lane_scalars/seed0/best.pt: S1's learned raw progress vs PDM's: MAE 1.01 m, median 0.85 m
+    as is              regret 0.0328  top-1 0.806
+    computed raw       regret 0.0359  top-1 0.797
+    PDM raw (ceiling)  regret 0.0333  top-1 0.773
+--- runs/s1_step_lane_scalars/seed1/best.pt: S1's learned raw progress vs PDM's: MAE 0.95 m, median 0.80 m
+    as is              regret 0.0313  top-1 0.820
+    computed raw       regret 0.0337  top-1 0.805
+    PDM raw (ceiling)  regret 0.0296  top-1 0.805
+--- runs/s1_step_lane_scalars/seed2/best.pt: S1's learned raw progress vs PDM's: MAE 1.11 m, median 0.98 m
+    as is              regret 0.0331  top-1 0.810
+    computed raw       regret 0.0360  top-1 0.802
+    PDM raw (ceiling)  regret 0.0334  top-1 0.782
+
+3-seed summary (mean ± sd):
+  as is              regret 0.0324 ± 0.0010   top-1 0.812
+  computed raw       regret 0.0352 ± 0.0013   top-1 0.801
+  PDM raw (ceiling)  regret 0.0321 ± 0.0022   top-1 0.787

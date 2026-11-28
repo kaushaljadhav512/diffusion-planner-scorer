@@ -1,0 +1,59 @@
+===== e94b99e48b355de6: probe vs original S1 seed 0 — max ego position gap 0.000 m over 149 steps (first gap > 1 cm at step none)
+  steps 0..58: 59; S1 picks PDM+SL's candidate on 4
+  S1's pick fails PDM+SL's collision check on 52 steps, collision or TTC on 56; on those steps a collision-free candidate existed on 31 of 52, one passing both on 30 of 56
+  step  pick  PDM+SL  | PDM label of S1's pick (col ttc prog) | S1's probs for its pick (col ttc prog) | S1's probs for PDM+SL's pick (col ttc prog) | S1 score pick vs PDM+SL's | progress m pick vs PDM+SL's
+     0     5       6  |             0.00 0.00 0.00             |           0.96 0.83 1.00               |           0.97 0.91 0.45                     | 0.655 vs 0.598            |   9.3 vs   4.2
+     4     4      15  |             0.00 0.00 0.00             |           0.97 0.92 1.00               |           0.97 0.94 0.42                     | 0.690 vs 0.588            |   9.9 vs   4.2
+     8     7      15  |             0.00 0.00 0.00             |           0.97 0.94 1.00               |           0.96 0.94 0.43                     | 0.693 vs 0.579            |   9.2 vs   4.0
+    12     6       0  |             0.00 0.00 0.00             |           0.96 0.94 1.00               |           0.95 0.93 0.48                     | 0.713 vs 0.607            |   6.7 vs   3.3
+    18     4       0  |             1.00 0.00 0.00             |           0.93 0.86 1.00               |           0.93 0.85 0.78                     | 0.648 vs 0.607            |   4.2 vs   3.0
+    23     2       0  |             0.00 0.00 0.00             |           0.93 0.83 1.00               |           0.93 0.83 0.88                     | 0.636 vs 0.616            |   5.3 vs   4.6
+    27     6       0  |             0.00 0.00 0.00             |           0.92 0.83 1.00               |           0.92 0.83 0.90                     | 0.628 vs 0.615            |   6.4 vs   5.6
+    31     3       0  |             0.00 0.00 0.00             |           0.91 0.79 0.99               |           0.91 0.81 0.59                     | 0.604 vs 0.554            |   7.3 vs   3.9
+    35     3       0  |             0.00 0.00 0.00             |           0.90 0.74 1.00               |           0.90 0.72 0.70                     | 0.569 vs 0.535            |   8.7 vs   5.4
+    39    12       0  |             0.00 0.00 0.00             |           0.91 0.74 1.00               |           0.89 0.68 0.72                     | 0.553 vs 0.513            |  10.4 vs   6.5
+    43    10       0  |             0.00 0.00 0.00             |           0.91 0.71 1.00               |           0.90 0.68 0.85                     | 0.568 vs 0.548            |  11.2 vs   9.0
+    47     4       0  |             0.00 0.00 0.00             |           0.91 0.71 1.00               |           0.91 0.69 0.84                     | 0.591 vs 0.566            |  12.1 vs   9.8
+    51    10       0  |             0.00 0.00 0.00             |           0.92 0.72 1.00               |           0.92 0.72 0.95                     | 0.613 vs 0.608            |  13.4 vs  12.6
+    55     1       0  |             0.00 0.00 0.00             |           0.94 0.81 1.00               |           0.94 0.80 0.72                     | 0.656 vs 0.626            |  15.5 vs  10.7
+  why S1 preferred its pick over PDM+SL's, mean over 52 failing steps where they differ (log score difference, + favours S1's pick):
+    metric        S1's prediction   PDM+SL label (what S1 was trained to predict)
+    collision       +0.002            -5.048
+    drivable        -0.016            -0.797
+    direction       -0.010            -2.032
+    progress        +0.093            -0.066
+    ttc             +0.000            -0.220
+    speed_limit     -0.001            -0.008
+    comfort         -0.000            +0.000
+    total           +0.069            -5.409
+  collision head over all 944 candidate-steps: mean P(no collision) 0.923 for the 566 PDM marks colliding vs 0.936 for the 378 it marks collision-free
+  within-step pair accuracy of the collision head (free rated safer than colliding): 0.254 over 1276 pairs
+===== 159942fd13675580: probe vs original S1 seed 0 — max ego position gap 0.000 m over 149 steps (first gap > 1 cm at step none)
+  steps 0..51: 52; S1 picks PDM+SL's candidate on 4
+  S1's pick fails PDM+SL's collision check on 47 steps, collision or TTC on 49; on those steps a collision-free candidate existed on 10 of 47, one passing both on 7 of 49
+  step  pick  PDM+SL  | PDM label of S1's pick (col ttc prog) | S1's probs for its pick (col ttc prog) | S1's probs for PDM+SL's pick (col ttc prog) | S1 score pick vs PDM+SL's | progress m pick vs PDM+SL's
+     3     2      13  |             1.00 0.00 1.00             |           0.90 0.48 1.00               |           0.91 0.55 0.83                     | 0.621 vs 0.612            |   5.8 vs   4.6
+     7    15       7  |             0.00 0.00 0.00             |           0.90 0.45 1.00               |           0.92 0.57 0.70                     | 0.615 vs 0.604            |   6.7 vs   4.4
+    11     3      12  |             0.00 0.00 0.00             |           0.89 0.42 1.00               |           0.90 0.47 0.83                     | 0.587 vs 0.574            |   7.7 vs   6.3
+    15     4       0  |             0.00 0.00 0.00             |           0.87 0.43 1.00               |           0.88 0.46 0.86                     | 0.568 vs 0.557            |   9.2 vs   7.6
+    19    15       0  |             0.00 0.00 0.00             |           0.88 0.51 1.00               |           0.88 0.51 0.98                     | 0.589 vs 0.587            |  10.2 vs  10.0
+    23     2       0  |             0.00 0.00 0.00             |           0.90 0.58 1.00               |           0.90 0.58 0.99                     | 0.620 vs 0.620            |  10.5 vs  10.4
+    27     6       0  |             0.00 0.00 0.00             |           0.91 0.70 1.00               |           0.91 0.68 0.93                     | 0.646 vs 0.645            |  11.4 vs  10.2
+    31     9       0  |             0.00 0.00 0.00             |           0.92 0.77 1.00               |           0.92 0.78 0.58                     | 0.654 vs 0.644            |  12.2 vs   6.1
+    35     7       0  |             0.00 0.00 0.00             |           0.94 0.88 0.39               |           0.94 0.89 0.35                     | 0.657 vs 0.654            |   4.5 vs   4.2
+    39    14       0  |             0.00 0.00 0.00             |           0.95 0.92 0.28               |           0.95 0.93 0.21                     | 0.664 vs 0.647            |   3.5 vs   2.7
+    43     8       0  |             0.00 0.00 0.00             |           0.95 0.92 0.34               |           0.94 0.86 0.42                     | 0.673 vs 0.662            |   3.7 vs   4.5
+    47     5       0  |             0.00 0.00 0.00             |           0.93 0.84 0.89               |           0.93 0.81 0.48                     | 0.678 vs 0.648            |  13.6 vs   5.6
+    51     5       0  |             0.00 0.00 0.00             |           0.93 0.84 0.89               |           0.93 0.84 0.77                     | 0.691 vs 0.678            |  14.4 vs  12.7
+  why S1 preferred its pick over PDM+SL's, mean over 45 failing steps where they differ (log score difference, + favours S1's pick):
+    metric        S1's prediction   PDM+SL label (what S1 was trained to predict)
+    collision       -0.002            -3.070
+    drivable        -0.007            -0.921
+    direction       -0.005            +0.062
+    progress        +0.041            -0.104
+    ttc             -0.003            -0.075
+    speed_limit     -0.002            -0.002
+    comfort         -0.000            +0.000
+    total           +0.023            -3.084
+  collision head over all 832 candidate-steps: mean P(no collision) 0.912 for the 674 PDM marks colliding vs 0.908 for the 158 it marks collision-free
+  within-step pair accuracy of the collision head (free rated safer than colliding): 0.997 over 326 pairs

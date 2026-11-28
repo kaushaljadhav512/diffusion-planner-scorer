@@ -1,0 +1,55 @@
+validation samples 5970; real ego speed found for 5970
+
+--- runs/s1_step_lane_scalars/seed0/best.pt
+  check 1: S1's learned raw progress minus PDM's [m]
+    label            unsafe: n  mean err     safe: n  mean err     within mixed scenes: unsafe - safe  (scenes)
+    collision             3924     +0.68       91596     +0.61                                  +0.39       238   (PDM raw progress, unsafe - safe: +1.16 m)
+    drivable              8808     +1.32       86712     +0.54                                  -0.04       313   (PDM raw progress, unsafe - safe: -0.22 m)
+    ttc                   8780     +0.68       86740     +0.61                                  +0.52       417   (PDM raw progress, unsafe - safe: +1.39 m)
+    any multiplier       12990     +1.50       82530     +0.48                                  +0.16       507   (PDM raw progress, unsafe - safe: +0.45 m)
+  check 2: regret by real ego speed
+    speed [m/s]   samples    as is  computed  PDM raw    computed - as is, share of total change
+    [ 0.0,   0.5)      865   0.0126    0.0154   0.0130                                        13%
+    [ 0.5,   3.0)      741   0.0633    0.0732   0.0616                                        40%
+    [ 3.0,   8.0)     1956   0.0533    0.0564   0.0548                                        32%
+    [ 8.0, 100.0)     1529   0.0180    0.0189   0.0183                                         8%
+
+--- runs/s1_step_lane_scalars/seed1/best.pt
+  check 1: S1's learned raw progress minus PDM's [m]
+    label            unsafe: n  mean err     safe: n  mean err     within mixed scenes: unsafe - safe  (scenes)
+    collision             3924     +0.36       91596     +0.49                                  +0.30       238   (PDM raw progress, unsafe - safe: +1.16 m)
+    drivable              8808     +1.06       86712     +0.42                                  -0.07       313   (PDM raw progress, unsafe - safe: -0.22 m)
+    ttc                   8780     +0.38       86740     +0.49                                  +0.35       417   (PDM raw progress, unsafe - safe: +1.39 m)
+    any multiplier       12990     +1.23       82530     +0.36                                  +0.09       507   (PDM raw progress, unsafe - safe: +0.45 m)
+  check 2: regret by real ego speed
+    speed [m/s]   samples    as is  computed  PDM raw    computed - as is, share of total change
+    [ 0.0,   0.5)      865   0.0108    0.0126   0.0114                                        11%
+    [ 0.5,   3.0)      741   0.0511    0.0556   0.0428                                        24%
+    [ 3.0,   8.0)     1956   0.0535    0.0560   0.0516                                        33%
+    [ 8.0, 100.0)     1529   0.0191    0.0194   0.0185                                         4%
+
+--- runs/s1_step_lane_scalars/seed2/best.pt
+  check 1: S1's learned raw progress minus PDM's [m]
+    label            unsafe: n  mean err     safe: n  mean err     within mixed scenes: unsafe - safe  (scenes)
+    collision             3924     +0.72       91596     +0.85                                  +0.29       238   (PDM raw progress, unsafe - safe: +1.16 m)
+    drivable              8808     +1.54       86712     +0.77                                  -0.08       313   (PDM raw progress, unsafe - safe: -0.22 m)
+    ttc                   8780     +0.74       86740     +0.85                                  +0.38       417   (PDM raw progress, unsafe - safe: +1.39 m)
+    any multiplier       12990     +1.66       82530     +0.71                                  +0.10       507   (PDM raw progress, unsafe - safe: +0.45 m)
+  check 2: regret by real ego speed
+    speed [m/s]   samples    as is  computed  PDM raw    computed - as is, share of total change
+    [ 0.0,   0.5)      865   0.0150    0.0195   0.0118                                        23%
+    [ 0.5,   3.0)      741   0.0571    0.0684   0.0610                                        49%
+    [ 3.0,   8.0)     1956   0.0526    0.0555   0.0540                                        33%
+    [ 8.0, 100.0)     1529   0.0188    0.0177   0.0185                                       -10%
+
+=== 3-seed means
+  check 1, within mixed scenes, learned-progress error of unsafe minus safe candidates [m]:
+    collision       +0.33  (seeds: +0.39, +0.30, +0.29)
+    drivable        -0.06  (seeds: -0.04, -0.07, -0.08)
+    ttc             +0.42  (seeds: +0.52, +0.35, +0.38)
+    any multiplier  +0.12  (seeds: +0.16, +0.09, +0.10)
+  check 2, regret by real ego speed (mean over seeds):
+    [ 0.0,   0.5)  n   865   as is 0.0128   computed 0.0158   PDM raw 0.0121   share of the regret increase 16%
+    [ 0.5,   3.0)  n   741   as is 0.0571   computed 0.0657   PDM raw 0.0552   share of the regret increase 38%
+    [ 3.0,   8.0)  n  1956   as is 0.0532   computed 0.0560   PDM raw 0.0535   share of the regret increase 33%
+    [ 8.0, 100.0)  n  1529   as is 0.0186   computed 0.0187   PDM raw 0.0184   share of the regret increase 1%

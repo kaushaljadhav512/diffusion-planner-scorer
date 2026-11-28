@@ -1,0 +1,17 @@
+samples 3000 (skipped 0); true E: mean 19.40 m, median 18.91, range 0.0 to 76.1; candidate 0 noise std [1.5]
+samples where the human speeds up or slows down a lot (|E - v*4 s| > 4 m): 942
+
+estimate    MAE median AE   bias  corr MAE starts/stops same pick as true E regret vs true-E target
+median     5.35      3.91  -1.45 0.891             9.63               0.707                  0.0060
+first      5.44      3.97  -1.49 0.888             9.66               0.671                  0.0098
+cv         3.25      2.04  +0.07 0.959             7.65               0.936                  0.0035
+ca         2.08      1.50  +1.00 0.989             2.98               0.965                  0.0020
+cv_plan    7.16      5.15  -0.66 0.816            12.62               0.793                  0.0060
+pdm_sl             (current progress definition, no E)               0.966                  0.0013
+
+MAE by the human's speed [m/s] (logged):
+      band        n   median    first       cv       ca  cv_plan
+  [-1,0.5)      840     1.55     1.57     0.95     0.73     2.58
+   [0.5,3)      356     7.44     7.51     5.25     2.12     9.38
+     [3,8)     1029     7.41     7.57     4.70     2.56    10.60
+   [8,100)      775     5.78     5.88     2.90     2.90     6.55

@@ -1,0 +1,27 @@
+validation samples 5970, scenarios 199
+  read 1/199 scenario logs
+  read 41/199 scenario logs
+  read 81/199 scenario logs
+  read 121/199 scenario logs
+  read 161/199 scenario logs
+simulated ego speed found for 5970 of 5970 samples; mean 4.55 m/s
+
+target = PDM+SL labels x CLS-style progress against E_cv; 5970 samples, 238 with mixed collision labels
+variant                                 regret  top-1 pick reaches E median m beyond E regret, mixed collision
+pdm_sl labels (current progress)        0.0004  0.965          0.635             -1.06                  0.0012
+S1 as is  [seed0]                       0.0315  0.855          0.629             -1.07                  0.3079
+S1 + cv E [seed0]                       0.0228  0.830          0.574             -1.26                  0.1861
+S1 as is  [seed1]                       0.0301  0.872          0.634             -1.04                  0.2579
+S1 + cv E [seed1]                       0.0217  0.853          0.584             -1.21                  0.1569
+S1 as is  [seed2]                       0.0322  0.856          0.637             -1.03                  0.3188
+S1 + cv E [seed2]                       0.0224  0.805          0.550             -1.30                  0.1740
+
+3-seed means:
+  S1 as is   regret 0.0313 +- 0.0011  top-1 0.861  reaches E 0.633  regret on mixed collision 0.2949
+  S1 + cv E  regret 0.0223 +- 0.0006  top-1 0.829  reaches E 0.569  regret on mixed collision 0.1723
+
+regret by simulated ego speed (3-seed means for S1):
+  [-1.0,  0.5) n  1629   pdm_sl 0.0001   S1 as is 0.0119   S1 + cv E 0.0018
+  [ 0.5,  3.0) n   995   pdm_sl 0.0016   S1 as is 0.0539   S1 + cv E 0.0329
+  [ 3.0,  8.0) n  1840   pdm_sl 0.0004   S1 as is 0.0464   S1 + cv E 0.0369
+  [ 8.0,100.0) n  1506   pdm_sl 0.0000   S1 as is 0.0188   S1 + cv E 0.0196

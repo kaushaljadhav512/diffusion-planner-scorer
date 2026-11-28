@@ -1,0 +1,44 @@
+runs with an at-fault collision (of 100 per seed), by what was hit; gate score < 1:
+what    VRU  object  vehicle
+cfg                         
+first     7       9       28
+pdm_sl    5       6       23
+s1       11       7       24
+w6        9       8       25
+
+scenario-seed runs with a VRU collision:
+cfg                                               first pdm_sl     s1     w6
+scenario         type                                                       
+159942fd13675580 waiting_for_pedestrian_to_cross  0,1,2         0,1,2  0,1,2
+2cf6ac2d997a5dff low_magnitude_speed              0,1,2  0,1,2  0,1,2  0,1,2
+9e220701888b5ab2 waiting_for_pedestrian_to_cross      1    0,1    0,1      2
+e94b99e48b355de6 waiting_for_pedestrian_to_cross                0,1,2    0,1 
+
+===== e94b99e48b355de6 (waiting_for_pedestrian_to_cross), 149 steps at 0.1 s
+  first different pick at step 0 (t = 0.0 s); ego speed 1.76 m/s; pedestrians in view: 57
+   s1      plan:  31.6 m over 8.0 s, speed at +2 s 2.62, +4 s 4.09 m/s, closest approach to a pedestrian's current position 1.53 m
+   pdm_sl  plan:  19.4 m over 8.0 s, speed at +2 s 0.61, +4 s 2.23 m/s, closest approach to a pedestrian's current position 1.07 m
+  S1 touches a pedestrian at step 58 (t = 5.8 s, 5.8 s after the first different pick); ego speed 2.63 m/s; pdm_sl ego speed at that step 1.00 m/s
+  ego speed every 2 s  s1:  1.8  1.1  1.2  2.8  4.3  4.7  5.4  5.7
+                   pdm_sl:  1.8  0.5  0.5  1.1  2.7  4.3  5.8  5.6
+===== 159942fd13675580 (waiting_for_pedestrian_to_cross), 149 steps at 0.1 s
+  first different pick at step 0 (t = 0.0 s); ego speed 0.00 m/s; pedestrians in view: 137
+   s1      plan:  23.0 m over 8.0 s, speed at +2 s 0.77, +4 s 2.78 m/s, closest approach to a pedestrian's current position 0.29 m
+   pdm_sl  plan:  25.4 m over 8.0 s, speed at +2 s 1.01, +4 s 3.16 m/s, closest approach to a pedestrian's current position 0.20 m
+  S1 touches a pedestrian at step 51 (t = 5.1 s, 5.1 s after the first different pick); ego speed 1.63 m/s; pdm_sl ego speed at that step 0.41 m/s
+  ego speed every 2 s  s1:  0.0  1.1  1.7  2.8  4.6  4.9  5.0  5.7
+                   pdm_sl:  0.0  0.7  0.9  0.3  1.6  4.4  5.6  5.8
+===== 40e1f34c92255a0e (starting_straight_traffic_light_intersection_traversal), 149 steps at 0.1 s
+  first different pick at step 3 (t = 0.3 s); ego speed 5.04 m/s; pedestrians in view: 2
+   s1      plan:  32.5 m over 8.0 s, speed at +2 s 2.82, +4 s 3.23 m/s, closest approach to a pedestrian's current position 45.00 m
+   pdm_sl  plan:  28.6 m over 8.0 s, speed at +2 s 2.39, +4 s 2.75 m/s, closest approach to a pedestrian's current position 44.78 m
+  no pedestrian contact by S1 found by footprint overlap
+  ego speed every 2 s  s1:  5.3  3.4  4.6  5.5  5.2  1.9  1.3  4.3
+                   pdm_sl:  5.3  3.4  4.6  6.1  5.9  3.3  6.4  6.8
+===== 2754fbd9c2445dce (changing_lane), 149 steps at 0.1 s
+  first different pick at step 0 (t = 0.0 s); ego speed 4.28 m/s; pedestrians in view: 1
+   s1      plan:  60.8 m over 8.0 s, speed at +2 s 7.14, +4 s 7.77 m/s, closest approach to a pedestrian's current position 24.65 m
+   pdm_sl  plan:  56.4 m over 8.0 s, speed at +2 s 6.54, +4 s 7.21 m/s, closest approach to a pedestrian's current position 24.68 m
+  no pedestrian contact by S1 found by footprint overlap
+  ego speed every 2 s  s1:  4.3  6.3  8.2  8.0  7.3  7.1  6.1  4.8
+                   pdm_sl:  4.3  5.0  5.6  6.5  7.0  6.2  5.2  4.6

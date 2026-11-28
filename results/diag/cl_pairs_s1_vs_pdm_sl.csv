@@ -1,0 +1,186 @@
+scenario,seed,scenario_type,delta,cause,loser
+e569500a38a256bf,0,stationary_in_traffic,-0.0514646652593862,progress,s1
+2b34e2a1fc6b543c,0,near_multiple_vehicles,-0.0002637611566218556,progress,s1
+2754fbd9c2445dce,0,changing_lane,-0.978891115075829,drivable (gate),s1
+5bebf2e252ec5367,0,high_lateral_acceleration,0.634735327406247,collision (gate),pdm_sl
+5a79cd2161c754c9,0,following_lane_with_lead,-0.006846712619917539,progress,s1
+752323a35a825d22,0,stopping_with_lead,0.00012652398587609248,progress,pdm_sl
+fd1a947d104956f8,0,low_magnitude_speed,0.0687414864239384,progress,pdm_sl
+b56eda3b0d1c5f67,0,stopping_with_lead,-0.01222784897521667,progress,s1
+e94b99e48b355de6,0,waiting_for_pedestrian_to_cross,-0.9658728348179983,collision (gate),s1
+763bb5fb88d2556f,0,near_multiple_vehicles,-0.006101028238626793,progress,s1
+8e355342a0115145,0,starting_left_turn,-0.0008741423175064877,progress,s1
+2c5af3c1152c5e69,0,low_magnitude_speed,-5.456814959448053e-06,speed_limit,s1
+660d375c109f5eed,0,behind_long_vehicle,0.002836119902094758,progress,pdm_sl
+90a02e90433d5137,0,high_magnitude_speed,-0.003573480652480421,speed_limit,s1
+1e502e7fc8745e0a,0,waiting_for_pedestrian_to_cross,0.015568886972004314,progress,pdm_sl
+56cdd36746c85788,0,high_magnitude_speed,0.000999891027200217,progress,pdm_sl
+c88e29a426805b27,0,near_multiple_vehicles,0.3125,ttc,pdm_sl
+5bc4f584c6325e50,0,stopping_with_lead,-0.005125001732532164,progress,s1
+5fa2710018705849,0,starting_straight_traffic_light_intersection_traversal,0.00015464500892492516,progress,pdm_sl
+ac286967ed895963,0,behind_long_vehicle,0.0047301135298649655,progress,pdm_sl
+8de10fd86b825304,0,starting_right_turn,0.0008145663936404146,progress,pdm_sl
+3e673b48bbf15727,0,high_lateral_acceleration,-0.125,comfort,s1
+0cd6cff135c25fa9,0,starting_left_turn,-0.022440891352393133,progress,s1
+99e63d494deb5808,0,traversing_pickup_dropoff,0.0030824396961453004,speed_limit,pdm_sl
+13f3028945475a79,0,traversing_pickup_dropoff,0.007064838731919876,speed_limit,pdm_sl
+74874f782e725aec,0,traversing_pickup_dropoff,0.005795382446442954,speed_limit,pdm_sl
+9fd5ec2b453d556e,0,starting_straight_traffic_light_intersection_traversal,-0.125,comfort,s1
+0586b3fb1ffb5fba,0,near_multiple_vehicles,-0.0030065164832112634,progress,s1
+0795bcd734235cf5,0,traversing_pickup_dropoff,-0.004628764746648861,speed_limit,s1
+d908073d216b5e04,0,traversing_pickup_dropoff,0.9583233523341513,drivable (gate),pdm_sl
+d453b49dafae5dd5,0,starting_straight_traffic_light_intersection_traversal,0.011218774317965585,progress,pdm_sl
+d3be3fa904135dd9,0,starting_left_turn,0.0019437779191624482,progress,pdm_sl
+6639a4f7873a56dc,0,stationary_in_traffic,0.0004324560530450938,progress,pdm_sl
+a1a3d628e53c5d75,0,stationary_in_traffic,-0.03748754036119206,progress,s1
+b327b4d0432a51a1,0,stopping_with_lead,-0.125,comfort,s1
+88aa2ad613205556,0,behind_long_vehicle,-0.008449292482746507,progress,s1
+60ad86e2dbf156b5,0,starting_left_turn,0.6875,collision (gate),pdm_sl
+40e1f34c92255a0e,0,starting_straight_traffic_light_intersection_traversal,-0.9204475244129202,collision (gate),s1
+9e7b8fa4248d55de,0,waiting_for_pedestrian_to_cross,-0.006653272846562586,progress,s1
+75025613e3935595,0,high_lateral_acceleration,-0.0030008137218611175,progress,s1
+32aea40a777c5156,0,high_lateral_acceleration,0.01049820696036774,progress,pdm_sl
+ebf09047e62a5fb8,0,stationary_in_traffic,-0.02263569786920705,progress,s1
+4236a1f3c9e35f9d,0,changing_lane,-3.710506083265397e-05,progress,s1
+338ca19e3fde5381,0,starting_left_turn,-0.0010211417651289079,progress,s1
+0d17d16b86e65700,0,waiting_for_pedestrian_to_cross,0.013153918742036197,progress,pdm_sl
+6ff0d0bb90d852b9,0,high_lateral_acceleration,-0.09361390129548686,comfort,s1
+62db9dc16ffd5135,0,traversing_pickup_dropoff,0.07778043771605292,progress,pdm_sl
+f7700356e6d85410,0,following_lane_with_lead,-0.1818111954249957,comfort,s1
+159942fd13675580,0,waiting_for_pedestrian_to_cross,-0.9633944975398467,collision (gate),s1
+b87bd5af8ff75bc5,0,changing_lane,9.913860122323648e-05,progress,pdm_sl
+a9407c1ea38959d5,0,high_magnitude_speed,0.0016346758577878706,progress,pdm_sl
+f352e2c4378b5ea1,0,traversing_pickup_dropoff,-0.015060200462809759,speed_limit,s1
+9914f87b536b5c23,0,waiting_for_pedestrian_to_cross,0.006970065999737041,progress,pdm_sl
+8c8e9b7de9bf541a,0,high_lateral_acceleration,-0.0023919138019530273,speed_limit,s1
+35c3787707ce5deb,0,high_lateral_acceleration,-0.0003169453825251356,progress,s1
+0b7bb38b72ff5034,0,starting_right_turn,0.12683673759341818,comfort,pdm_sl
+535516116fa35117,0,starting_straight_traffic_light_intersection_traversal,0.0035905066269695807,progress,pdm_sl
+a22b2b1e04595a0e,0,high_magnitude_speed,0.00325989419822581,progress,pdm_sl
+edc971e9dc7f5165,0,high_magnitude_speed,0.0012683511476947462,progress,pdm_sl
+179a1bf034c650ce,0,starting_right_turn,0.0038647723506124443,progress,pdm_sl
+56022a77c9fd5a1e,0,near_multiple_vehicles,0.0004445739104359525,progress,pdm_sl
+8629ab5781b853d3,0,high_magnitude_speed,-0.00045837522256308993,progress,s1
+6262500c70275443,0,stopping_with_lead,-0.002441938679100031,progress,s1
+e569500a38a256bf,1,stationary_in_traffic,-0.03416101025734675,progress,s1
+2b34e2a1fc6b543c,1,near_multiple_vehicles,0.002774732958241266,progress,pdm_sl
+5a79cd2161c754c9,1,following_lane_with_lead,-0.009685052714362485,progress,s1
+752323a35a825d22,1,stopping_with_lead,-0.0048322567077601075,progress,s1
+fd1a947d104956f8,1,low_magnitude_speed,0.07719378326317483,progress,pdm_sl
+b56eda3b0d1c5f67,1,stopping_with_lead,-0.006493551904141248,progress,s1
+e94b99e48b355de6,1,waiting_for_pedestrian_to_cross,-0.9664018754609136,collision (gate),s1
+763bb5fb88d2556f,1,near_multiple_vehicles,-0.0004146961490134604,progress,s1
+8e355342a0115145,1,starting_left_turn,0.00027447209479702916,progress,pdm_sl
+2c5af3c1152c5e69,1,low_magnitude_speed,-0.005196142461941666,speed_limit,s1
+660d375c109f5eed,1,behind_long_vehicle,0.002459159543102496,progress,pdm_sl
+90a02e90433d5137,1,high_magnitude_speed,-0.0033986614857106634,speed_limit,s1
+1e502e7fc8745e0a,1,waiting_for_pedestrian_to_cross,0.012073442074125862,progress,pdm_sl
+56cdd36746c85788,1,high_magnitude_speed,0.0006132438698338571,progress,pdm_sl
+c88e29a426805b27,1,near_multiple_vehicles,0.3125,ttc,pdm_sl
+5bc4f584c6325e50,1,stopping_with_lead,-0.008477847349169232,progress,s1
+5fa2710018705849,1,starting_straight_traffic_light_intersection_traversal,5.058182320039073e-05,progress,pdm_sl
+ac286967ed895963,1,behind_long_vehicle,0.00643559495751278,progress,pdm_sl
+8de10fd86b825304,1,starting_right_turn,-0.004583210884666067,progress,s1
+3e673b48bbf15727,1,high_lateral_acceleration,-0.125,comfort,s1
+0cd6cff135c25fa9,1,starting_left_turn,-0.9031090131174275,drivable (gate),s1
+99e63d494deb5808,1,traversing_pickup_dropoff,0.0017279535262162415,speed_limit,pdm_sl
+13f3028945475a79,1,traversing_pickup_dropoff,-0.004104347348738435,speed_limit,s1
+74874f782e725aec,1,traversing_pickup_dropoff,8.422310778410935e-05,speed_limit,pdm_sl
+9fd5ec2b453d556e,1,starting_straight_traffic_light_intersection_traversal,-0.125,comfort,s1
+0586b3fb1ffb5fba,1,near_multiple_vehicles,-0.0008943705192063778,progress,s1
+0795bcd734235cf5,1,traversing_pickup_dropoff,-0.34832163558090323,collision (gate),s1
+d908073d216b5e04,1,traversing_pickup_dropoff,0.953547751677211,drivable (gate),pdm_sl
+d453b49dafae5dd5,1,starting_straight_traffic_light_intersection_traversal,0.018479362626622753,progress,pdm_sl
+d3be3fa904135dd9,1,starting_left_turn,0.0017650655719351205,progress,pdm_sl
+6639a4f7873a56dc,1,stationary_in_traffic,-0.0038043120331644475,progress,s1
+a1a3d628e53c5d75,1,stationary_in_traffic,-0.03920172767413821,progress,s1
+b327b4d0432a51a1,1,stopping_with_lead,-0.125,comfort,s1
+88aa2ad613205556,1,behind_long_vehicle,-0.009965806715122594,progress,s1
+40e1f34c92255a0e,1,starting_straight_traffic_light_intersection_traversal,-0.9156758787976016,collision (gate),s1
+9e7b8fa4248d55de,1,waiting_for_pedestrian_to_cross,-0.002954367615698561,progress,s1
+75025613e3935595,1,high_lateral_acceleration,0.01846615908363336,progress,pdm_sl
+32aea40a777c5156,1,high_lateral_acceleration,0.012571650306816728,progress,pdm_sl
+ebf09047e62a5fb8,1,stationary_in_traffic,-0.02389827127574129,progress,s1
+4236a1f3c9e35f9d,1,changing_lane,-2.0640338376010092e-05,progress,s1
+338ca19e3fde5381,1,starting_left_turn,-0.001895995296266939,progress,s1
+0d17d16b86e65700,1,waiting_for_pedestrian_to_cross,-0.01962273732159492,progress,s1
+6ff0d0bb90d852b9,1,high_lateral_acceleration,0.031224461107037693,progress,pdm_sl
+62db9dc16ffd5135,1,traversing_pickup_dropoff,0.07595509164139225,progress,pdm_sl
+f7700356e6d85410,1,following_lane_with_lead,-0.14969856650180313,comfort,s1
+159942fd13675580,1,waiting_for_pedestrian_to_cross,-0.963616901175788,collision (gate),s1
+b87bd5af8ff75bc5,1,changing_lane,0.0002776337057522893,progress,pdm_sl
+a9407c1ea38959d5,1,high_magnitude_speed,-0.0030272565927098594,progress,s1
+f352e2c4378b5ea1,1,traversing_pickup_dropoff,0.0014778648693718477,speed_limit,pdm_sl
+9914f87b536b5c23,1,waiting_for_pedestrian_to_cross,0.001142660423864461,speed_limit,pdm_sl
+8c8e9b7de9bf541a,1,high_lateral_acceleration,-0.004319802008669216,speed_limit,s1
+35c3787707ce5deb,1,high_lateral_acceleration,-0.00023433260263427957,progress,s1
+0b7bb38b72ff5034,1,starting_right_turn,0.0022563513068156738,progress,pdm_sl
+535516116fa35117,1,starting_straight_traffic_light_intersection_traversal,-0.0020775680945228636,progress,s1
+a22b2b1e04595a0e,1,high_magnitude_speed,-0.11841999689827798,comfort,s1
+edc971e9dc7f5165,1,high_magnitude_speed,0.001777829969562772,progress,pdm_sl
+179a1bf034c650ce,1,starting_right_turn,0.001640333472983091,speed_limit,pdm_sl
+56022a77c9fd5a1e,1,near_multiple_vehicles,0.0004442423363931747,progress,pdm_sl
+8629ab5781b853d3,1,high_magnitude_speed,-9.786403415124045e-05,progress,s1
+6262500c70275443,1,stopping_with_lead,-0.0024760321412146125,progress,s1
+e569500a38a256bf,2,stationary_in_traffic,-0.030522403552200816,progress,s1
+2b34e2a1fc6b543c,2,near_multiple_vehicles,0.0023351131423162697,progress,pdm_sl
+5a79cd2161c754c9,2,following_lane_with_lead,-0.011707577242411227,progress,s1
+752323a35a825d22,2,stopping_with_lead,-0.00869253614203469,progress,s1
+fd1a947d104956f8,2,low_magnitude_speed,0.057379269060066074,progress,pdm_sl
+b56eda3b0d1c5f67,2,stopping_with_lead,-0.009805145155318606,progress,s1
+e94b99e48b355de6,2,waiting_for_pedestrian_to_cross,-0.9645569299806254,collision (gate),s1
+763bb5fb88d2556f,2,near_multiple_vehicles,-0.003577213919090161,progress,s1
+8e355342a0115145,2,starting_left_turn,-0.0004373945297471149,progress,s1
+2c5af3c1152c5e69,2,low_magnitude_speed,-0.0019949470623251697,speed_limit,s1
+660d375c109f5eed,2,behind_long_vehicle,0.0023455450157333635,progress,pdm_sl
+90a02e90433d5137,2,high_magnitude_speed,-0.0033433482382561053,speed_limit,s1
+1e502e7fc8745e0a,2,waiting_for_pedestrian_to_cross,0.01562662278052873,progress,pdm_sl
+c2c649fcd5325b3d,2,starting_right_turn,-0.013455159431871921,progress,s1
+56cdd36746c85788,2,high_magnitude_speed,0.0006881350895043825,progress,pdm_sl
+c88e29a426805b27,2,near_multiple_vehicles,0.3125,ttc,pdm_sl
+5fa2710018705849,2,starting_straight_traffic_light_intersection_traversal,0.00016985931679980304,progress,pdm_sl
+2b3f110c96995dd1,2,starting_right_turn,0.125,comfort,pdm_sl
+ac286967ed895963,2,behind_long_vehicle,0.000637145397527572,progress,pdm_sl
+8de10fd86b825304,2,starting_right_turn,-0.0065083916752710635,speed_limit,s1
+3e673b48bbf15727,2,high_lateral_acceleration,-0.125,comfort,s1
+0cd6cff135c25fa9,2,starting_left_turn,-0.8727708864826111,drivable (gate),s1
+99e63d494deb5808,2,traversing_pickup_dropoff,-0.018202881184352426,speed_limit,s1
+13f3028945475a79,2,traversing_pickup_dropoff,-0.018404865428823025,speed_limit,s1
+74874f782e725aec,2,traversing_pickup_dropoff,0.0023965288296455833,speed_limit,pdm_sl
+9fd5ec2b453d556e,2,starting_straight_traffic_light_intersection_traversal,-0.125,comfort,s1
+0586b3fb1ffb5fba,2,near_multiple_vehicles,0.000991814651234657,progress,pdm_sl
+0795bcd734235cf5,2,traversing_pickup_dropoff,-0.00993813333962934,speed_limit,s1
+d453b49dafae5dd5,2,starting_straight_traffic_light_intersection_traversal,-0.005352036936670745,progress,s1
+d3be3fa904135dd9,2,starting_left_turn,0.0023922614269661358,progress,pdm_sl
+6639a4f7873a56dc,2,stationary_in_traffic,0.000516545160713755,progress,pdm_sl
+a1a3d628e53c5d75,2,stationary_in_traffic,-0.037390926245319034,progress,s1
+b327b4d0432a51a1,2,stopping_with_lead,-0.125,comfort,s1
+88aa2ad613205556,2,behind_long_vehicle,-0.01502584744022295,progress,s1
+60ad86e2dbf156b5,2,starting_left_turn,-0.6875,collision (gate),s1
+40e1f34c92255a0e,2,starting_straight_traffic_light_intersection_traversal,0.28712670110850336,ttc,pdm_sl
+9e7b8fa4248d55de,2,waiting_for_pedestrian_to_cross,-0.005971177337033451,progress,s1
+75025613e3935595,2,high_lateral_acceleration,0.010752344419186932,progress,pdm_sl
+32aea40a777c5156,2,high_lateral_acceleration,0.008840900737349777,progress,pdm_sl
+ebf09047e62a5fb8,2,stationary_in_traffic,-0.13747134875553169,comfort,s1
+4236a1f3c9e35f9d,2,changing_lane,-2.6582766011751247e-06,progress,s1
+338ca19e3fde5381,2,starting_left_turn,-0.002911580192108243,progress,s1
+0d17d16b86e65700,2,waiting_for_pedestrian_to_cross,-0.0011889837604200926,progress,s1
+6ff0d0bb90d852b9,2,high_lateral_acceleration,-0.08594965301364632,comfort,s1
+62db9dc16ffd5135,2,traversing_pickup_dropoff,0.4073467436875454,ttc,pdm_sl
+f7700356e6d85410,2,following_lane_with_lead,-0.14211052261032409,comfort,s1
+159942fd13675580,2,waiting_for_pedestrian_to_cross,-0.9606509253892193,collision (gate),s1
+b87bd5af8ff75bc5,2,changing_lane,-2.218241067164506e-05,progress,s1
+a9407c1ea38959d5,2,high_magnitude_speed,-0.0022428335594025794,speed_limit,s1
+f352e2c4378b5ea1,2,traversing_pickup_dropoff,-0.022220570754299396,speed_limit,s1
+edbc6fe0dfbf51f1,2,starting_straight_traffic_light_intersection_traversal,0.125,comfort,pdm_sl
+9914f87b536b5c23,2,waiting_for_pedestrian_to_cross,0.006465106642506768,progress,pdm_sl
+6d0875dbcec45b3a,2,high_lateral_acceleration,-0.125,comfort,s1
+8c8e9b7de9bf541a,2,high_lateral_acceleration,-0.0026037156226810243,speed_limit,s1
+0b7bb38b72ff5034,2,starting_right_turn,-0.2957027474505527,ttc,s1
+535516116fa35117,2,starting_straight_traffic_light_intersection_traversal,-0.002202763167096,speed_limit,s1
+a22b2b1e04595a0e,2,high_magnitude_speed,-0.1207060553556748,comfort,s1
+edc971e9dc7f5165,2,high_magnitude_speed,0.0020386034882838855,progress,pdm_sl
+179a1bf034c650ce,2,starting_right_turn,-0.0005354059372215669,progress,s1
+56022a77c9fd5a1e,2,near_multiple_vehicles,0.0010122591682879545,progress,pdm_sl
+8629ab5781b853d3,2,high_magnitude_speed,-1.5117466111491673e-05,progress,s1
+6262500c70275443,2,stopping_with_lead,-0.004288046876229634,progress,s1

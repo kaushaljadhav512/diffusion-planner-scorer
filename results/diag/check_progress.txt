@@ -1,0 +1,9 @@
+samples 3000 (skipped without route lanes: 0), candidates 48000; PDM progress_cv: mean 17.96 m, median 17.36, range 0.0 to 76.0
+estimate   MAE [m]  median AE   p90 AE    bias   corr  same best  best within 0.5 m  within-scene rank corr
+route         0.77       0.31     1.26   -0.01  0.984      0.829              0.992                   0.965
+euclid        0.74       0.32     1.43   -0.02  0.988      0.819              0.999                   0.922
+forward       1.04       0.34     2.26   -0.45  0.984      0.829              0.996                   0.960
+  route, PDM progress in [-5, 2) m: 12590 candidates, MAE 0.75 m, bias +0.50 m
+  route, PDM progress in [2, 10) m: 6386 candidates, MAE 0.64 m, bias -0.38 m
+  route, PDM progress in [10, 25) m: 11750 candidates, MAE 0.84 m, bias +0.07 m
+  route, PDM progress in [25, 80) m: 17274 candidates, MAE 0.80 m, bias -0.30 m

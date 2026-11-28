@@ -1,0 +1,215 @@
+closed-loop CLS check (mean over scenarios and seeds):
+cfg
+first     75.13
+pdm_sl    78.52
+s1        75.60
+w6        75.52 
+
+===== s1 vs pdm_sl: mean CLS difference -2.92 (per seed: -1.73, -3.40, -3.63)
+(scenario, seed) pairs: 300; s1 lower on 109, higher on 76, equal on 115
+CLS points by cause (sum over pairs / 300); loser = config that scored lower on that pair:
+                          sum  count
+cause            loser              
+collision (gate) pdm_sl  0.44      2
+                 s1     -2.89     10
+comfort          pdm_sl  0.13      3
+                 s1     -0.76     18
+drivable (gate)  pdm_sl  0.64      2
+                 s1     -0.92      3
+progress         pdm_sl  0.20     55
+                 s1     -0.17     58
+speed_limit      pdm_sl  0.01      9
+                 s1     -0.04     19
+ttc              pdm_sl  0.54      5
+                 s1     -0.10      1 
+
+scenarios with mean loss: 43; worst 10 carry 90% of total loss; scenarios lost in all 3 seeds: 23, won in all 3: 14
+mean CLS difference by scenario type (per scenario, mean over seeds; 100 = whole score):
+                                                         mean  count
+scenario_type                                                       
+waiting_for_pedestrian_to_cross                        -27.38      7
+starting_left_turn                                      -8.57      7
+starting_straight_traffic_light_intersection_traversal  -8.45      7
+changing_lane                                           -4.08      8
+following_lane_with_lead                                -2.39      7
+stopping_with_lead                                      -2.09      7
+stationary_in_traffic                                   -1.99      7
+high_magnitude_speed                                    -1.16      7
+starting_right_turn                                     -0.29      7
+behind_long_vehicle                                     -0.07      7
+high_lateral_acceleration                                0.14      8
+low_magnitude_speed                                      0.93      7
+near_multiple_vehicles                                   4.43      7
+traversing_pickup_dropoff                                9.78      7 
+
+===== s1 vs first: mean CLS difference +0.47 (per seed: +2.55, -0.23, -0.91)
+(scenario, seed) pairs: 300; s1 lower on 64, higher on 131, equal on 105
+CLS points by cause (sum over pairs / 300); loser = config that scored lower on that pair:
+                               sum  count
+cause                  loser             
+collision (gate)       first  2.05      8
+                       s1    -1.62      6
+comfort                first  0.36      8
+                       s1    -0.48     12
+drivable (gate)        first  0.64      2
+                       s1    -1.30      4
+making_progress (gate) s1    -0.33      1
+progress               first  0.34     81
+                       s1    -0.16     27
+speed_limit            first  0.11     23
+                       s1    -0.04     13
+ttc                    first  0.98      9
+                       s1    -0.09      1 
+
+scenarios with mean loss: 24; worst 10 carry 95% of total loss; scenarios lost in all 3 seeds: 14, won in all 3: 37
+mean CLS difference by scenario type (per scenario, mean over seeds; 100 = whole score):
+                                                         mean  count
+scenario_type                                                       
+waiting_for_pedestrian_to_cross                        -13.28      7
+changing_lane                                          -11.97      8
+behind_long_vehicle                                     -7.49      7
+starting_left_turn                                      -2.66      7
+stopping_with_lead                                      -1.76      7
+stationary_in_traffic                                   -1.52      7
+starting_right_turn                                     -0.01      7
+low_magnitude_speed                                      0.35      7
+starting_straight_traffic_light_intersection_traversal   2.51      7
+following_lane_with_lead                                 3.67      7
+high_magnitude_speed                                     4.80      7
+near_multiple_vehicles                                   4.92      7
+high_lateral_acceleration                                5.05      8
+traversing_pickup_dropoff                               25.10      7 
+
+===== w6 vs pdm_sl: mean CLS difference -3.00 (per seed: -3.68, -4.57, -0.76)
+(scenario, seed) pairs: 300; w6 lower on 103, higher on 77, equal on 120
+CLS points by cause (sum over pairs / 300); loser = config that scored lower on that pair:
+                                sum  count
+cause                  loser              
+collision (gate)       w6     -2.26      8
+comfort                w6     -0.83     20
+drivable (gate)        pdm_sl  0.55      2
+                       w6     -1.22      4
+making_progress (gate) pdm_sl  0.33      1
+progress               pdm_sl  0.17     58
+                       w6     -0.20     55
+speed_limit            pdm_sl  0.03     10
+                       w6     -0.03     14
+ttc                    pdm_sl  0.64      6
+                       w6     -0.18      2 
+
+scenarios with mean loss: 38; worst 10 carry 89% of total loss; scenarios lost in all 3 seeds: 23, won in all 3: 19
+mean CLS difference by scenario type (per scenario, mean over seeds; 100 = whole score):
+                                                         mean  count
+scenario_type                                                       
+waiting_for_pedestrian_to_cross                        -24.25      7
+starting_left_turn                                     -16.08      7
+starting_straight_traffic_light_intersection_traversal  -5.15      7
+high_lateral_acceleration                               -3.34      8
+following_lane_with_lead                                -2.39      7
+stationary_in_traffic                                   -1.93      7
+stopping_with_lead                                      -1.54      7
+high_magnitude_speed                                    -1.17      7
+starting_right_turn                                     -0.79      7
+behind_long_vehicle                                     -0.09      7
+low_magnitude_speed                                      0.95      7
+changing_lane                                            2.87      8
+near_multiple_vehicles                                   4.44      7
+traversing_pickup_dropoff                                5.66      7 
+
+===== first vs pdm_sl: mean CLS difference -3.39 (per seed: -4.28, -3.17, -2.72)
+(scenario, seed) pairs: 300; first lower on 145, higher on 40, equal on 115
+CLS points by cause (sum over pairs / 300); loser = config that scored lower on that pair:
+                                sum  count
+cause                  loser              
+collision (gate)       first  -3.46     12
+                       pdm_sl  0.56      2
+comfort                first  -0.59     13
+                       pdm_sl  0.11      3
+drivable (gate)        pdm_sl  0.33      1
+making_progress (gate) pdm_sl  0.33      1
+progress               first  -0.31     91
+                       pdm_sl  0.17     23
+speed_limit            first  -0.12     25
+                       pdm_sl  0.02     10
+ttc                    first  -0.41      4 
+
+scenarios with mean loss: 50; worst 10 carry 85% of total loss; scenarios lost in all 3 seeds: 42, won in all 3: 8
+mean CLS difference by scenario type (per scenario, mean over seeds; 100 = whole score):
+                                                         mean  count
+scenario_type                                                       
+traversing_pickup_dropoff                              -15.32      7
+waiting_for_pedestrian_to_cross                        -14.10      7
+starting_straight_traffic_light_intersection_traversal -10.96      7
+following_lane_with_lead                                -6.06      7
+high_magnitude_speed                                    -5.96      7
+starting_left_turn                                      -5.90      7
+high_lateral_acceleration                               -4.91      8
+near_multiple_vehicles                                  -0.48      7
+stationary_in_traffic                                   -0.46      7
+stopping_with_lead                                      -0.33      7
+starting_right_turn                                     -0.28      7
+low_magnitude_speed                                      0.59      7
+behind_long_vehicle                                      7.42      7
+changing_lane                                            7.90      8 
+
+===== 15 scenarios where S1 loses most to pdm_sl (scores 0-100 per seed):
+                                                                    type           s1       pdm_sl        first           w6  mean_loss                      s1_causes
+scenario                                                                                                                                                              
+e94b99e48b355de6                         waiting_for_pedestrian_to_cross    0   0   0   97  97  96   94  94  94    0   0  65      -96.6               collision (gate)
+159942fd13675580                         waiting_for_pedestrian_to_cross    0   0   0   96  96  96    0   0   0    0   0   0      -96.3               collision (gate)
+0cd6cff135c25fa9                                      starting_left_turn   88   0   0   90  90  87   97  97  97    0   0   0      -59.9      drivable (gate), progress
+40e1f34c92255a0e  starting_straight_traffic_light_intersection_traversal    0   0  85   92  92  56    0   0  57   84   0  84      -51.6               collision (gate)
+2754fbd9c2445dce                                           changing_lane    0   0   0   98   0   0   98  98  98    0   0  98      -32.6                drivable (gate)
+f7700356e6d85410                                following_lane_with_lead   82  85  86  100 100 100   85   0  86   85  87  84      -15.8                        comfort
+3e673b48bbf15727                               high_lateral_acceleration   56  56  56   69  69  69   56  69  69   56  56  56      -12.5                        comfort
+9fd5ec2b453d556e  starting_straight_traffic_light_intersection_traversal   88  88  88  100 100 100   88  88  88   88  88  88      -12.5                        comfort
+b327b4d0432a51a1                                      stopping_with_lead   88  88  88  100 100 100  100 100 100  100  88  88      -12.5                        comfort
+0795bcd734235cf5                               traversing_pickup_dropoff   68  34  68   69  69  69   69  69  69  100  68  34      -12.1  collision (gate), speed_limit
+a22b2b1e04595a0e                                    high_magnitude_speed   90  78  78   89  89  90   88  88  76   90  77  78       -7.9                        comfort
+ebf09047e62a5fb8                                   stationary_in_traffic   98  98  86  100 100 100  100 100  99   97 100  98       -6.1              comfort, progress
+0b7bb38b72ff5034                                     starting_right_turn   97  97  67   84  96  96   93  92  92   84  95  81       -5.6                            ttc
+6ff0d0bb90d852b9                               high_lateral_acceleration   87  99  88   96  96  96   97  97  97   88  88  88       -4.9                        comfort
+6d0875dbcec45b3a                               high_lateral_acceleration  100 100  88  100 100 100  100  84 100  100  88  88       -4.2                        comfort 
+
+===== gate failures and weighted metrics, closed loop (% of 300 scenario-seed runs; weighted = mean score):
+        collision fail%  drivable fail%  direction fail%  making_progress fail%  progress mean  ttc mean  speed_limit mean  comfort mean
+cfg                                                                                                                                     
+first              14.7             5.0              0.0                    0.0           93.3      74.0              95.3          89.3
+pdm_sl             11.3             5.3              0.0                    0.7           93.3      78.7              96.6          93.3
+s1                 14.0             5.7              0.0                    1.3           93.1      77.7              96.1          87.7
+w6                 14.0             6.0              0.0                    0.7           93.9      78.0              96.4          85.7 
+
+===== open loop: miss-rate gate failures per seed (of 100 scenarios):
+seed     0   1   2
+cfg               
+first   20  18  22
+pdm_sl  20  18  19
+s1      25  22  24
+w6      22  26  23 
+
+(scenario, seed) where S1 fails the miss gate but pdm_sl and first pass: 10; distinct scenarios 5; also failed by w6 in the same seed: 8
+scenario_type
+starting_left_turn           5
+changing_lane                2
+starting_right_turn          2
+traversing_pickup_dropoff    1 
+
+scenarios failing the miss gate more often with the verifiers (seeds failed, of 3):
+cfg                                                                       s1   w6  pdm_sl  first
+scenario         scenario_type                                                                  
+0cd6cff135c25fa9 starting_left_turn                                      3.0  3.0     0.0    0.0
+1c17b9dad1f65970 following_lane_with_lead                                3.0  3.0     3.0    0.0
+5d392fa38ff65c3f changing_lane                                           3.0  3.0     3.0    1.0
+60ad86e2dbf156b5 starting_left_turn                                      3.0  3.0     1.0    0.0
+96074214b9645952 changing_lane                                           3.0  3.0     0.0    1.0
+9e220701888b5ab2 waiting_for_pedestrian_to_cross                         3.0  3.0     3.0    1.0
+a9407c1ea38959d5 high_magnitude_speed                                    3.0  3.0     3.0    2.0
+cb0c11da557650db changing_lane                                           3.0  3.0     3.0    2.0
+f7700356e6d85410 following_lane_with_lead                                3.0  3.0     1.0    3.0
+fd1a947d104956f8 low_magnitude_speed                                     3.0  3.0     3.0    2.0
+d908073d216b5e04 traversing_pickup_dropoff                               2.0  2.0     0.0    1.0
+d4edda3ab1d75034 starting_right_turn                                     2.0  1.0     0.0    0.0
+5bebf2e252ec5367 high_lateral_acceleration                               1.0  2.0     1.0    1.0
+9fd5ec2b453d556e starting_straight_traffic_light_intersection_traversal  0.0  1.0     0.0    0.0 
+
+overlap: scenarios with S1 closed-loop mean loss > 5 points: 13; with extra verifier miss failures: 13; in both: 2
