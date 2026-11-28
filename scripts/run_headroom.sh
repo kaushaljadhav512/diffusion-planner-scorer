@@ -22,7 +22,7 @@ export K="${K:-16}" NOISE="${NOISE:-0.5}" SEED="${SEED:-0}"
 mkdir -p "$NUPLAN_EXP_ROOT/logs"
 failed=()
 for c in $CHALLENGES; do for s in $SELECTORS; do
-  [ "$s" = oracle ] && [ "$c" = r ] && continue  # logged futures are only exact without reactive agents
+  case "$s" in oracle*) [ "$c" = r ] && continue ;; esac  # logged futures are only exact without reactive agents
   log="$NUPLAN_EXP_ROOT/logs/dp_k${K}_${s}_noise${NOISE/,/-}_seed${SEED}_${SPLIT}_${c}${SMOKE:+_smoke$SMOKE}_$(date +%m%d-%H%M).log"
   echo "=== K=$K noise=$NOISE seed=$SEED $s / $SPLIT / $c  (log: $log)"
   start=$SECONDS

@@ -137,6 +137,82 @@ class PDMSpeedLimitSelector(PDMSelector):
         return combined_score(from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance()))
 
 
+class PDMExpertProgressSelector(PDMSelector):
+    """
+    PDMSpeedLimitSelector's constant-velocity metrics with nuPlan's progress definition: each candidate's progress
+    relative to the human driver's logged progress over the same horizon, plus ego_is_making_progress as a
+    multiplicative metric (combined_score_expert). The other agents keep their constant-velocity forecasts, so this
+    is OracleExpertProgressSelector without logged agent futures: the score a selector would reach with a perfect
+    prediction of the human driver's progress. Non-reactive simulation only (the human's progress is read from the
+    log).
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        self._scenario = None
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        assert context.scenario is not None, "PDMExpertProgressSelector needs the scenario (logged human progress)"
+        self._scenario = context.scenario
+        return super().select(candidates, context)
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        expert = self._scorer.expert_progress(self._scenario, planner_input.iteration.index)
+        return combined_score_expert(metrics, progress, expert)
+
+
+class PDMEstimatedProgressSelector(PDMSelector):
+    """
+    PDMExpertProgressSelector with the human driver's progress estimated instead of read from the log, so it can
+    run at test time. Training-free estimates of the human's progress over the scored horizon:
+
+        median  median raw progress of the K candidates (DP imitates human drivers)
+        first   raw progress of candidate 0; with NOISE=0.5,1.5 that is vanilla DP's own plan
+        cv      constant velocity: ego's current longitudinal speed x horizon
+        ca      constant acceleration: v t + a t^2 / 2, or the stopping distance v^2 / (2 |a|) if ego stops sooner
+
+    Works in reactive simulation too (nothing is read from the log).
+    """
+
+    ESTIMATES = ("median", "first", "cv", "ca")
+
+    def __init__(self, estimate: str = "median", map_radius: float = 50.0, proposal_poses: int = 40):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        assert estimate in self.ESTIMATES, f"estimate must be one of {self.ESTIMATES}, got {estimate}"
+        self._estimate = estimate
+        self.last_estimate = None
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        self.last_estimate = self.estimate_progress(planner_input, progress)
+        return combined_score_expert(metrics, progress, self.last_estimate)
+
+    def estimate_progress(self, planner_input: "PlannerInput", progress) -> float:
+        """Estimated progress [m] of the human driver over the scored horizon."""
+        import numpy as np
+
+        if self._estimate == "median":
+            return float(np.median(progress))
+        if self._estimate == "first":
+            return float(progress[0])
+        horizon_s = self._scorer.horizon_poses * self._scorer._proposal_sampling.interval_length
+        car = planner_input.history.current_state[0].dynamic_car_state
+        v, a = max(float(car.rear_axle_velocity_2d.x), 0.0), float(car.rear_axle_acceleration_2d.x)
+        if self._estimate == "cv" or a >= 0.0:
+            return v * horizon_s + (0.5 * a * horizon_s ** 2 if self._estimate == "ca" else 0.0)
+        stop_s = v / -a
+        return v * v / (2.0 * -a) if stop_s < horizon_s else v * horizon_s + 0.5 * a * horizon_s ** 2
+
+
 class OracleSelector(PDMSelector):
     """
     Upper bound for the headroom run: PDMSelector, but the other agents follow their logged futures instead of
@@ -153,6 +229,67 @@ class OracleSelector(PDMSelector):
         assert context.scenario is not None, "OracleSelector needs the scenario (logged future)"
         self._scorer.scenario = context.scenario
         return super().select(candidates, context)
+
+
+class OracleSpeedLimitSelector(OracleSelector):
+    """
+    OracleSelector with PDMSpeedLimitSelector's combined score (CLS weights, speed limit included), i.e. the argmax
+    of the verifier's current training target (metrics_oracle of the label files). OracleSelector itself uses PDM's
+    own score, without speed limit. Non-reactive simulation only.
+    """
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        return combined_score(from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance()))
+
+
+class OracleExpertProgressSelector(OracleSelector):
+    """
+    OracleSpeedLimitSelector with nuPlan's progress definition instead of PDM's: each candidate's progress relative
+    to the human driver's logged progress over the same horizon, plus ego_is_making_progress as a multiplicative
+    metric (diffusion_planner.scorer.metrics.combined_score_expert). Tests whether this label definition tracks the
+    closed-loop score better than the current one. Non-reactive simulation only.
+
+    stats_dir: if set, one CSV per scenario with, per step, the pick under both definitions and the progress values.
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40, stats_dir: Optional[str] = None):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        self._stats_dir = stats_dir
+        self._scenario = None
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        self._scenario = context.scenario
+        return super().select(candidates, context)
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        import numpy as np
+        from diffusion_planner.scorer.metrics import combined_score, combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        expert = self._scorer.expert_progress(self._scenario, planner_input.iteration.index)
+        scores = combined_score_expert(metrics, progress, expert)
+
+        if self._stats_dir is not None:
+            old = combined_score(metrics)
+            self._write_stats(planner_input.iteration.index, int(np.argmax(old)), int(np.argmax(scores)),
+                              expert, progress)
+        return scores
+
+    def _write_stats(self, iteration: int, old_pick: int, new_pick: int, expert: float, progress) -> None:
+        import os
+        scenario = self._scenario
+        path = os.path.join(self._stats_dir, f"{scenario.log_name}__{scenario.token}__{scenario.scenario_type}.csv")
+        new_file = not os.path.exists(path)
+        os.makedirs(self._stats_dir, exist_ok=True)
+        with open(path, "a") as f:
+            if new_file:
+                f.write("iteration,old_pick,new_pick,expert_progress,max_progress,min_progress\n")
+            f.write(f"{iteration},{old_pick},{new_pick},{expert:.3f},{max(progress):.3f},{min(progress):.3f}\n")
 
 
 def gather_selected(candidates: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
@@ -186,5 +323,53 @@ class VerifierSelector(AbstractSelector):
         assert context.inputs is not None, "VerifierSelector needs the normalized model inputs"
         inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
         scores = self._model.score(inputs, candidates[:, :, 0].to(self._device).float())   # [B, K]
+        best = scores.max(dim=1, keepdim=True).values
+        return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)
+
+
+class VerifierExpertProgressSelector(VerifierSelector):
+    """
+    VerifierSelector with progress scored against an estimate of the human driver's progress instead of PDM's
+    normalization: progress = min(1, max(raw, 2 m) / max(E, 2 m)), no safety gating, and ego_is_making_progress as a
+    multiplier (as in combined_score_expert). E = ego's current longitudinal speed x 4 s (constant velocity, as
+    PDMEstimatedProgressSelector's "cv"). The other metrics are the verifier's predictions.
+
+    raw_source: "predicted" = the verifier's own raw-progress head (any checkpoint, no retraining);
+                "computed" = progress along the route from the plan (route_progress), as a model trained with
+                --progress-mode ep_cv was trained on
+    """
+
+    def __init__(self, ckpt_path: str, args_file: str, device: str = "cuda", raw_source: str = "predicted"):
+        super().__init__(ckpt_path=ckpt_path, args_file=args_file, device=device)
+        assert raw_source in ("predicted", "computed"), f"raw_source must be predicted or computed, got {raw_source}"
+        self._raw_source = raw_source
+        self.last_estimate = None
+
+    @torch.no_grad()
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        from diffusion_planner.scorer.metrics import combined_score
+        from diffusion_planner.scorer.route_progress import (constant_velocity_expert, expert_progress_score,
+                                                             route_progress)
+
+        assert context.inputs is not None and context.planner_input is not None, \
+            "VerifierExpertProgressSelector needs the model inputs and the PlannerInput"
+        inputs = {k: v.to(self._device) for k, v in context.inputs.items()}
+        plans = candidates[:, :, 0].to(self._device).float()
+        out, aux = self._model(inputs, plans, return_aux=True)
+        probs = torch.sigmoid(out).clone()                                  # [B, K, 7]
+        if self._raw_source == "predicted":
+            raw = aux["progress_raw"]                                       # [B, K] metres
+        else:
+            rl, pl = context.inputs["route_lanes"].cpu().numpy(), candidates[:, :, 0].cpu().numpy()
+            raw = torch.stack([torch.from_numpy(route_progress(rl[b], pl[b])).float() for b in range(len(pl))])
+            raw = raw.to(probs.device)
+
+        car = context.planner_input.history.current_state[0].dynamic_car_state
+        speed = torch.full((probs.shape[0],), float(car.rear_axle_velocity_2d.x), device=probs.device)
+        expert = constant_velocity_expert(speed)
+        self.last_estimate = float(expert[0])
+        ratio, making = expert_progress_score(raw, expert)
+        probs[..., 3] = ratio
+        scores = combined_score(probs) * making                             # [B, K]
         best = scores.max(dim=1, keepdim=True).values
         return (scores >= best - 1e-6).float().argmax(dim=1).to(candidates.device)

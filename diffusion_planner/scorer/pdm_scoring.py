@@ -4,6 +4,7 @@ from typing import Dict, List
 import numpy as np
 import numpy.typing as npt
 import shapely.creation
+from shapely.geometry import Point
 
 from nuplan.common.actor_state.ego_state import EgoState
 from nuplan.common.actor_state.tracked_objects import TrackedObject
@@ -134,6 +135,31 @@ class PDMCandidateScorer(PDMClosedPlanner):
             "weighted_metrics": self._scorer._weighted_metrics.copy(), # [3, K] progress (normalized), ttc, comfort
             "progress_raw": self._scorer._progress_raw.copy(),         # [K] metres along the centerline
         }
+
+    def expert_progress(self, scenario: AbstractScenario, iteration: int) -> float:
+        """
+        Progress [m] of the logged ego (the human driver) along the same centerline as the candidates, over the
+        scored horizon, from its own logged pose at `iteration`. Needs a score() call of this scenario first (the
+        centerline). Near the end of the log, where less than the horizon is logged, the available progress is
+        scaled up to the full horizon.
+        """
+        horizon_s = self.horizon_poses * self._proposal_sampling.interval_length
+        start = scenario.get_ego_state_at_iteration(iteration)
+        future = list(scenario.get_ego_future_trajectory(
+            iteration=iteration, time_horizon=horizon_s, num_samples=self.horizon_poses
+        ))
+        if not future:
+            return 0.0
+        end = future[-1]
+        start_progress, end_progress = self._centerline.project([
+            Point(start.center.x, start.center.y), Point(end.center.x, end.center.y),
+        ])
+        progress = float(end_progress - start_progress)
+
+        duration_s = (end.time_point.time_us - start.time_point.time_us) * 1e-6
+        if 0.0 < duration_s < 0.99 * horizon_s:
+            progress *= horizon_s / duration_s
+        return progress
 
     def speed_limit_compliance(self) -> npt.NDArray[np.float64]:
         """

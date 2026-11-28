@@ -43,7 +43,8 @@ from diffusion_planner.scorer.analytic_metrics import corner_lane_distance_torch
 from diffusion_planner.scorer.lane_features import STEP_LANE_MODES
 from diffusion_planner.scorer.dataset import LabelDataset, find_samples, split_by_scenario, subsample_scenarios
 from diffusion_planner.scorer.metrics import METRICS, combined_score
-from diffusion_planner.scorer.model import ANY_STEP, ARCHS, HORIZON, PROGRESS_SCALE, Verifier
+from diffusion_planner.scorer.model import ANY_STEP, ARCHS, HORIZON, PROB_EPS, PROGRESS, PROGRESS_SCALE, Verifier
+from diffusion_planner.scorer.route_progress import constant_velocity_expert, expert_progress_score
 
 ROOT = Path(__file__).resolve().parents[2]
 TIE_TOLERANCE = 1e-6
@@ -81,19 +82,42 @@ def first_max(scores: torch.Tensor) -> torch.Tensor:
     return (scores >= best - TIE_TOLERANCE).float().argmax(dim=1)
 
 
-def loss_fn(logits: torch.Tensor, metrics: torch.Tensor, rank_weight: float, rank_temperature: float) -> torch.Tensor:
+def loss_fn(logits: torch.Tensor, metrics: torch.Tensor, rank_weight: float, rank_temperature: float,
+            gate: torch.Tensor = None) -> torch.Tensor:
     """
     Args:
         logits: [B, K, M] verifier output
         metrics: [B, K, M] target metric values in [0, 1]
+        gate: [B, K] extra multiplier on both combined scores (--progress-mode ep_cv: ego_is_making_progress)
     """
     loss = F.binary_cross_entropy_with_logits(logits, metrics)
     if rank_weight > 0:
         # Listwise: the softmax over candidates of the predicted combined score should match the target's
-        predicted = combined_score(torch.sigmoid(logits)) / rank_temperature
-        target = F.softmax(combined_score(metrics) / rank_temperature, dim=1)
+        g = 1.0 if gate is None else gate
+        predicted = combined_score(torch.sigmoid(logits)) * g / rank_temperature
+        target = F.softmax(combined_score(metrics) * g / rank_temperature, dim=1)
         loss = loss + rank_weight * -(target * F.log_softmax(predicted, dim=1)).sum(dim=1).mean()
     return loss
+
+
+def apply_progress_mode(logits: torch.Tensor, batch, labels: str, mode: str):
+    """
+    The training target and the model's progress column under --progress-mode.
+        pdm:   the labels as recorded (PDM's progress, normalized by the best candidate); logits unchanged; no gate
+        ep_cv: progress = min(1, max(raw, 2 m) / max(E, 2 m)) on the computed route progress (sidecar progress_route)
+               against E = the simulated ego's speed x 4 s (sidecar ego_speed), in both the target and the model's
+               progress column (so progress is never learned), plus ego_is_making_progress as a gate
+    Returns: logits, target metrics [B, K, M], gate [B, K] or None
+    """
+    metrics = batch[f"metrics_{labels}"]
+    if mode == "pdm":
+        return logits, metrics, None
+    ratio, making = expert_progress_score(batch["progress_route"], constant_velocity_expert(batch["ego_speed"]))
+    target = metrics.clone()
+    target[..., PROGRESS] = ratio
+    logits = logits.clone()
+    logits[..., PROGRESS] = torch.logit(ratio, eps=PROB_EPS)
+    return logits, target, making
 
 
 def classify_loss(scores: torch.Tensor, metrics: torch.Tensor, temperature: float) -> torch.Tensor:
@@ -163,7 +187,9 @@ def pairwise_accuracy(predicted: torch.Tensor, labels: torch.Tensor) -> float:
 
 @torch.no_grad()
 def evaluate(model: Verifier, loader: DataLoader, labels: str, device: str, analytic: bool = False,
-             corner_weight: float = 0.0, margin_weight: float = 0.0) -> Dict[str, float]:
+             corner_weight: float = 0.0, margin_weight: float = 0.0, progress_mode: str = "pdm") -> Dict[str, float]:
+    """Regret and top-1 against the training target of --progress-mode (pdm: the labels; ep_cv: the CLS-style score).
+    "pdm" picks by PDM+SL's own labels with its own progress definition, scored against that target."""
     model.eval()
     true, predicted, pdm, drivable_pred, drivable_label = [], [], [], [], []
     step_hits = step_n = cand_hits = cand_n = 0
@@ -171,12 +197,18 @@ def evaluate(model: Verifier, loader: DataLoader, labels: str, device: str, anal
     for batch in loader:
         batch = to_device(batch, device)
         out, aux = model(batch["inputs"], batch["candidates"], return_aux=True)
-        predicted.append((out[..., 0] if out.shape[-1] == 1 else combined_score(torch.sigmoid(out))).cpu())
-        true.append(combined_score(batch[f"metrics_{labels}"]).cpu())
+        if out.shape[-1] == 1:
+            target, gate = batch[f"metrics_{labels}"], None
+            predicted.append(out[..., 0].cpu())
+        else:
+            out, target, gate = apply_progress_mode(out, batch, labels, progress_mode)
+            g = 1.0 if gate is None else gate
+            predicted.append((combined_score(torch.sigmoid(out)) * g).cpu())
+        true.append((combined_score(target) * (1.0 if gate is None else gate)).cpu())
         pdm.append(combined_score(batch["metrics_cv"]).cpu())
         if out.shape[-1] > 1:
             drivable_pred.append(torch.sigmoid(out[..., DRIVABLE]).cpu())
-            drivable_label.append(batch[f"metrics_{labels}"][..., DRIVABLE].cpu())
+            drivable_label.append(target[..., DRIVABLE].cpu())
         if analytic:
             targets = analytic_targets(batch)
             v = targets["valid"]
@@ -228,6 +260,14 @@ def run(args, config=None) -> Dict[str, float]:
         if args.train_frac < 1.0:
             # Learning curve: fewer training scenarios, same validation scenarios
             train_files = subsample_scenarios(train_files, args.train_frac, args.seed)
+    if args.progress_mode == "ep_cv":
+        assert args.sidecar, "--progress-mode ep_cv needs --sidecar (scripts/make_epcv_sidecar.py)"
+        assert args.objective == "metrics", "--progress-mode ep_cv needs --objective metrics"
+        side = Path(args.sidecar).expanduser()
+        has = lambda f: (side / f.parent.name / f.name).exists()
+        n_train, n_val = len(train_files), len(val_files)
+        train_files, val_files = [f for f in train_files if has(f)], [f for f in val_files if has(f)]
+        print(f"[train] ep_cv: sidecar found for {len(train_files)} / {n_train} train, {len(val_files)} / {n_val} val")
     print(f"[train] {len(train_files)} train / {len(val_files)} val samples, "
           f"{len({f.parent for f in train_files})} / {len({f.parent for f in val_files})} scenarios")
 
@@ -255,8 +295,9 @@ def run(args, config=None) -> Dict[str, float]:
 
     loader_kwargs = dict(batch_size=args.batch_size, num_workers=args.num_workers,
                          pin_memory=args.device.startswith("cuda"))
-    train_loader = DataLoader(LabelDataset(train_files), shuffle=True, drop_last=False, **loader_kwargs)
-    val_loader = DataLoader(LabelDataset(val_files), shuffle=False, **loader_kwargs)
+    sidecar = args.sidecar if args.progress_mode == "ep_cv" else None
+    train_loader = DataLoader(LabelDataset(train_files, sidecar), shuffle=True, drop_last=False, **loader_kwargs)
+    val_loader = DataLoader(LabelDataset(val_files, sidecar), shuffle=False, **loader_kwargs)
 
     params = [p for p in model.parameters() if p.requires_grad]
     print(f"[train] trainable parameters: {sum(p.numel() for p in params) / 1e6:.2f} M")
@@ -276,7 +317,8 @@ def run(args, config=None) -> Dict[str, float]:
             elif args.objective == "classify":
                 loss = classify_loss(logits[..., 0], batch[f"metrics_{args.labels}"], args.rank_temperature)
             else:
-                loss = loss_fn(logits, batch[f"metrics_{args.labels}"], args.rank_weight, args.rank_temperature)
+                lg, target, gate = apply_progress_mode(logits, batch, args.labels, args.progress_mode)
+                loss = loss_fn(lg, target, args.rank_weight, args.rank_temperature, gate)
             if "progress_raw" in aux and args.progress_weight > 0 and not args.analytic_only:
                 loss = loss + args.progress_weight * F.smooth_l1_loss(
                     aux["progress_raw"] / PROGRESS_SCALE, batch[f"progress_{args.labels}"] / PROGRESS_SCALE)
@@ -292,7 +334,7 @@ def run(args, config=None) -> Dict[str, float]:
 
         metrics = {"epoch": epoch, "loss": float(np.mean(losses)), "seconds": time.time() - start,
                    **evaluate(model, val_loader, args.labels, args.device, analytic, args.corner_weight,
-                              args.margin_weight)}
+                              args.margin_weight, args.progress_mode)}
         log.write(json.dumps(metrics) + "\n")
         log.flush()
         print(f"[epoch {epoch:3d}] loss {metrics['loss']:.4f} | regret verifier {metrics['all/verifier/regret']:.4f} "
@@ -353,6 +395,11 @@ def parse_args(argv=None):
                          "none (w6), scalars (exact geometry), segments (scalars + pooled nearest lane segments)")
     ap.add_argument("--init-from", default=None,
                     help="checkpoint (train.py best.pt / last.pt) to start from, e.g. an --analytic-only run")
+    ap.add_argument("--progress-mode", choices=["pdm", "ep_cv"], default="pdm",
+                    help="progress term of the target and the score: pdm = PDM's (normalized by the best candidate); "
+                         "ep_cv = CLS-style against the ego's constant-velocity progress, on computed route progress "
+                         "(needs --sidecar; set --progress-weight 0, the learned progress head is not used)")
+    ap.add_argument("--sidecar", default=None, help="dir from scripts/make_epcv_sidecar.py (--progress-mode ep_cv)")
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--split-seed", type=int, default=None,
                     help="seed of the train/val split (default: --seed); fix it to compare runs on one val set")

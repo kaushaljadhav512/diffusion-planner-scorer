@@ -14,6 +14,8 @@ futures, exact in non-reactive simulation) and saves one sample:
         metrics_cv        [K, 7] the same with constant-velocity forecasts (what PDMSelector sees)
         progress_oracle   [K] raw progress along the centerline [m] (metrics_*[:, 3] is it normalized by the best)
         progress_cv       [K]
+        progress_expert   raw progress of the logged ego (human driver) over the same horizon [m], from its own
+                          logged pose (for nuPlan's expert-relative progress, metrics.combined_score_expert)
         selected          index of the executed candidate
         noise_scale       [K] initial-noise std of each candidate
         scenario_token, scenario_type, log_name, iteration
@@ -50,6 +52,7 @@ def save_sample(
         log_name: str,
         iteration: int,
         neighbors: Optional[np.ndarray] = None,
+        progress_expert: Optional[float] = None,
     ) -> None:
     """Writes one label sample (format in the module docstring); atomic, so an interrupted run leaves no partial file."""
     arrays = {INPUT_PREFIX + k: v for k, v in inputs.items()}
@@ -66,6 +69,8 @@ def save_sample(
         log_name=np.str_(log_name),
         iteration=np.int64(iteration),
     )
+    if progress_expert is not None:
+        arrays["progress_expert"] = np.float32(progress_expert)
     if neighbors is not None:
         arrays["neighbors"] = neighbors.astype(np.float16)
 
@@ -154,6 +159,7 @@ class LabelRecorder(AbstractSelector):
         progress_oracle = self._oracle.last_metrics()["progress_raw"]
 
         iteration = context.planner_input.iteration.index
+        progress_expert = self._oracle.expert_progress(scenario, iteration)
         save_sample(
             sample_dir(self._out_dir, scenario.log_name, scenario.token, scenario.scenario_type) / f"{iteration:04d}.npz",
             inputs={k: v[0].detach().cpu().numpy() for k, v in context.inputs.items()},
@@ -163,6 +169,7 @@ class LabelRecorder(AbstractSelector):
             metrics_cv=metrics_cv,
             progress_oracle=progress_oracle,
             progress_cv=progress_cv,
+            progress_expert=progress_expert,
             selected=selected,
             noise_scale=np.asarray(context.noise_scale if context.noise_scale is not None else [np.nan] * K),
             scenario_token=scenario.token,
