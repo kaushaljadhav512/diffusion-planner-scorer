@@ -18,10 +18,15 @@
 #   Without an NVIDIA GPU the planner automatically runs on CPU.
 #   dp_k only:
 #   K=N            candidates per step (default 16)
-#   SELECTOR=s     first | random | pdm | pdm_sl | oracle | label | verifier (default first)
+#   SELECTOR=s     first | random | pdm | pdm_sl | pdm_sl_ep | oracle | oracle_sl | oracle_ep | label | verifier (default first)
 #                    verifier: learned verifier, checkpoint VERIFIER_CKPT (default results/verifier/w3_oracle/best.pt)
 #                    pdm_sl: PDM plus nuPlan's speed-limit metric, CLS weights
+#                    pdm_sl_ep: pdm_sl's constant-velocity metrics with progress relative to the human driver's logged
+#                               progress + ego_is_making_progress (oracle_ep without logged agent futures), nr only
 #                    oracle: PDM with logged futures, nr only
+#                    oracle_sl: oracle with pdm_sl's score (the verifier's current training target), nr only
+#                    oracle_ep: oracle_sl with nuPlan's expert-relative progress + ego_is_making_progress, nr only;
+#                               per-step picks under both definitions go to ORACLE_STATS_DIR if set
 #                    label:  drives with PDM and records verifier labels to LABEL_DIR, nr only (diffusion_planner/scorer/labels.py)
 #   VERIFIER_TAG=t verifier only: appended to the run name (dp_k<K>_verifier_<t>...) so runs of different checkpoints
 #                  are kept apart, e.g. VERIFIER_TAG=s1
@@ -89,9 +94,19 @@ case "$PLANNER" in
       random) SELECTOR_TARGET=diffusion_planner.scorer.selectors.Random ;;
       pdm)    SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMSelector ;;
       pdm_sl) SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMSpeedLimitSelector ;;
+      pdm_sl_ep)
+        [ "$CH" = nr ] || { echo "SELECTOR=pdm_sl_ep needs nr: the human driver's progress is read from the log"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.PDMExpertProgressSelector ;;
       oracle)
         [ "$CH" = nr ] || { echo "SELECTOR=oracle needs nr: reactive agents leave the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSelector ;;
+      oracle_sl)
+        [ "$CH" = nr ] || { echo "SELECTOR=oracle_sl needs nr: reactive agents leave the logged future"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleSpeedLimitSelector ;;
+      oracle_ep)
+        [ "$CH" = nr ] || { echo "SELECTOR=oracle_ep needs nr: reactive agents leave the logged future"; exit 1; }
+        SELECTOR_TARGET=diffusion_planner.scorer.selectors.OracleExpertProgressSelector
+        [ -z "${ORACLE_STATS_DIR:-}" ] || SELECTOR_ARGS+=("++planner.diffusion_planner_k.selector.stats_dir=$ORACLE_STATS_DIR") ;;
       label)
         [ "$CH" = nr ] || { echo "SELECTOR=label needs nr: the oracle labels use the logged future"; exit 1; }
         SELECTOR_TARGET=diffusion_planner.scorer.labels.LabelRecorder
@@ -106,7 +121,7 @@ case "$PLANNER" in
           "++planner.diffusion_planner_k.selector.args_file=$DP_ROOT/checkpoints/args.json"
           "++planner.diffusion_planner_k.selector.device=$DP_DEVICE"
         ) ;;
-      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | oracle | label | verifier)"; exit 1 ;;
+      *) echo "unknown SELECTOR $SELECTOR (first | random | pdm | pdm_sl | pdm_sl_ep | oracle | oracle_sl | oracle_ep | label | verifier)"; exit 1 ;;
     esac
     case "$NOISE" in
       *,*) NOISE_FIRST="${NOISE%%,*}"; NOISE_REST="${NOISE#*,}" ;;

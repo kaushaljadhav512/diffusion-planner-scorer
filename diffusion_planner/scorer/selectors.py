@@ -155,6 +155,67 @@ class OracleSelector(PDMSelector):
         return super().select(candidates, context)
 
 
+class OracleSpeedLimitSelector(OracleSelector):
+    """
+    OracleSelector with PDMSpeedLimitSelector's combined score (CLS weights, speed limit included), i.e. the argmax
+    of the verifier's current training target (metrics_oracle of the label files). OracleSelector itself uses PDM's
+    own score, without speed limit. Non-reactive simulation only.
+    """
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        from diffusion_planner.scorer.metrics import combined_score, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        return combined_score(from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance()))
+
+
+class OracleExpertProgressSelector(OracleSelector):
+    """
+    OracleSpeedLimitSelector with nuPlan's progress definition instead of PDM's: each candidate's progress relative
+    to the human driver's logged progress over the same horizon, plus ego_is_making_progress as a multiplicative
+    metric (diffusion_planner.scorer.metrics.combined_score_expert). Tests whether this label definition tracks the
+    closed-loop score better than the current one. Non-reactive simulation only.
+
+    stats_dir: if set, one CSV per scenario with, per step, the pick under both definitions and the progress values.
+    """
+
+    def __init__(self, map_radius: float = 50.0, proposal_poses: int = 40, stats_dir: Optional[str] = None):
+        super().__init__(map_radius=map_radius, proposal_poses=proposal_poses)
+        self._stats_dir = stats_dir
+        self._scenario = None
+
+    def select(self, candidates: torch.Tensor, context: SelectionContext) -> torch.Tensor:
+        self._scenario = context.scenario
+        return super().select(candidates, context)
+
+    def _score(self, planner_input: "PlannerInput", ego_plans) -> "np.ndarray":
+        import numpy as np
+        from diffusion_planner.scorer.metrics import combined_score, combined_score_expert, from_pdm
+
+        self._scorer.score(planner_input, ego_plans)
+        metrics = from_pdm(self._scorer.last_metrics(), self._scorer.speed_limit_compliance())
+        progress = self._scorer.last_metrics()["progress_raw"]
+        expert = self._scorer.expert_progress(self._scenario, planner_input.iteration.index)
+        scores = combined_score_expert(metrics, progress, expert)
+
+        if self._stats_dir is not None:
+            old = combined_score(metrics)
+            self._write_stats(planner_input.iteration.index, int(np.argmax(old)), int(np.argmax(scores)),
+                              expert, progress)
+        return scores
+
+    def _write_stats(self, iteration: int, old_pick: int, new_pick: int, expert: float, progress) -> None:
+        import os
+        scenario = self._scenario
+        path = os.path.join(self._stats_dir, f"{scenario.log_name}__{scenario.token}__{scenario.scenario_type}.csv")
+        new_file = not os.path.exists(path)
+        os.makedirs(self._stats_dir, exist_ok=True)
+        with open(path, "a") as f:
+            if new_file:
+                f.write("iteration,old_pick,new_pick,expert_progress,max_progress,min_progress\n")
+            f.write(f"{iteration},{old_pick},{new_pick},{expert:.3f},{max(progress):.3f},{min(progress):.3f}\n")
+
+
 def gather_selected(candidates: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     """
     Args:
