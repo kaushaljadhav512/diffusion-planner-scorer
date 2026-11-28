@@ -115,7 +115,20 @@ Starts and stops are the 942 samples where the human's progress differs from con
 
 - No gain: comfort rises 6 points to PDM+SL's level, collisions are unchanged and route progress drops 5.6 points (the rule-based version with the same E lost 1 point). Without the speed pull, the pick falls to S1's collision predictions, which still cannot separate candidates.
 - Offline the same change cuts regret against a CLS-style target by 29% (0.0313 to 0.0223, 5,970 validation samples); offline single-step regret has now disagreed with closed loop twice.
-- Follow-up queued: S1 retrained on that target (S1-EP), with progress computed from the plan in training and closed loop. Design, evidence and run plan: Doc.
+- Follow-up run: S1 retrained on that target (S1-EP, results below), with progress computed from the plan in training and closed loop. Design, evidence and run plan: Doc.
+
+**S1-EP: S1 retrained on the CLS-style target** (`--progress-mode ep_cv`: PDM+SL's constant-velocity labels for every metric except progress; progress = min(1, max(raw, 2 m) / max(E, 2 m)) on progress computed along the route, E = the simulated ego's speed × 4 s, plus the making-progress multiplier; the same computed progress in closed loop). Trained and run 2026-11-28, same settings, 3 seeds.
+
+| Selector | Seed 0 | Seed 1 | Seed 2 | CLS (mean ± sd) | Collision-free | TTC | Route progress | Comfort |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 as is | 77.23 | 74.56 | 75.00 | 75.60 ± 1.43 | 87.0% | 77.7% | 93.1% | 87.7% |
+| **S1-EP** | 78.11 | 77.56 | 74.85 | **76.84 ± 1.75** | 87.8% | 77.3% | 89.6% | 94.7% |
+| `pdm_sl` | 78.96 | 77.96 | 78.64 | 78.52 ± 0.51 | 89.5% | 78.7% | 93.3% | 93.3% |
+
+- First verifier change to beat S1 in closed loop: +1.24 paired (+0.88, +3.00, −0.15), within seed noise, and +1.31 over applying the same target at inference only (positive in every seed). Still 1.68 below PDM+SL.
+- The gain is comfort (+7.0 points). Collisions and TTC barely move, and route progress stays 3.5 points below S1.
+- Offline: validation regret against the new target 0.0196 ± 0.0009, top-1 0.891, drivable pair accuracy 0.667; best epochs 7 to 15 of 30.
+- So the speed pull is gone, and the remaining gap is collision ranking: directions 1 and 2 (per-step agent features, within-scene pairwise collision loss) now go on top of S1-EP, plus a minimum E for a stopped ego for route progress.
 
 **Next**
 

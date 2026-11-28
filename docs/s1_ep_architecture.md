@@ -90,6 +90,45 @@ Rule-based scoring with this target beats PDM+SL in closed loop; S1 with the tar
 - In closed loop the same change gives no gain: comfort rises 6 points, collisions are unchanged and route progress drops 5.6 points. Offline single-step regret has misled twice now, so closed loop decides.
 - S1's other predictions were trained with the old progress definition beside them. Retraining on the new target is what S1-EP tests.
 
+## Results
+
+S1-EP scores 76.84 ± 1.75 CLS in closed loop, 1.24 above S1 as is and the first verifier change to beat it, but within seed noise and still 1.68 below PDM+SL. The queue finished on 2026-11-28 at 07:41 with all 300 simulations successful.
+
+**Closed loop** (Test14-hard-100, non-reactive, K = 16, noise 1.5, verifier seed = sampling seed)
+
+| Selector | Seed 0 | Seed 1 | Seed 2 | CLS (mean ± sd) |
+| --- | --- | --- | --- | --- |
+| S1 as is | 77.23 | 74.56 | 75.00 | 75.60 ± 1.43 |
+| S1, constant-velocity E at inference only | 76.07 | 75.90 | 74.62 | 75.53 ± 0.79 |
+| **S1-EP** | **78.11** | **77.56** | 74.85 | **76.84 ± 1.75** |
+| `pdm_sl` | 78.96 | 77.96 | 78.64 | 78.52 ± 0.51 |
+| `pdm_sl_ep_cv` (rule-based, same target) | 79.47 | 79.54 | 78.51 | 79.17 ± 0.58 |
+
+| 3-seed means | Collision-free | TTC | Making progress | Route progress | Comfort |
+| --- | --- | --- | --- | --- | --- |
+| S1 as is | 87.0% | 77.7% | 98.7% | 93.1% | 87.7% |
+| S1, E at inference only | 87.5% | 76.7% | — | 87.5% | 93.7% |
+| **S1-EP** | 87.8% | 77.3% | 98.0% | 89.6% | **94.7%** |
+| `pdm_sl` | 89.5% | 78.7% | 99.3% | 93.3% | 93.3% |
+
+- Against S1 as is, paired by seed: +0.88, +3.00, −0.15 (mean +1.24), under the ~1.5 CLS seed-noise threshold. Against the inference-only version: +2.04, +1.66, +0.23 (mean +1.31), so retraining helps in every seed.
+- Comfort gains most (+7.0 points over S1, above PDM+SL). Route progress recovers part of the inference-only loss (87.5% to 89.6%) but stays 3.5 points below S1.
+- Collisions and TTC barely move (87.0% to 87.8%, 77.7% to 77.3%): the target removes the speed pull but does not sharpen collision ranking, as expected. Seed 2 is the weakest (collision-free 86.0%, TTC 75.0%).
+
+**Offline** (best epoch by validation regret against the new target)
+
+| Seed | Best epoch | Regret | Top-1 | Drivable pair accuracy |
+| --- | --- | --- | --- | --- |
+| 0 | 15 | 0.0197 | 0.897 | 0.683 |
+| 1 | 9 | 0.0187 | 0.893 | 0.667 |
+| 2 | 7 | 0.0205 | 0.883 | 0.650 |
+| Mean |  | 0.0196 ± 0.0009 | 0.891 | 0.667 |
+
+- The best epochs come early (7 to 15 of 30), so later epochs likely overfit validation regret.
+- Not directly comparable with the cheap check's 0.0223: that target scored progress with PDM's raw progress, this one with the computed progress.
+
+**Next**: collisions and TTC are the remaining gap to PDM+SL, so per-step agent features and a within-scene pairwise collision loss now go on top of S1-EP. A minimum E for a stopped ego is the candidate fix for route progress.
+
 ## Training and evaluation plan
 
 Queued on aegis on Nov 28, 2026 at 00:41 (`runs/run_s1_ep_cv.sh` in `~/IDL_project/dps-true-e`, tmux session `s1ep`); each step starts only if the one before succeeded.
