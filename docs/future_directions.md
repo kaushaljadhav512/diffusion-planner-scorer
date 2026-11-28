@@ -1,8 +1,127 @@
 # Learned Verifier: Future Directions
 
-Nov 20, 2026 · @Kaushal
+Nov 20, 2026 · @Kaushal · Markdown snapshot of the Claude Doc https://claude.ai/artifact/TcCVpvvn887ZQqY534HVUt
+
+**New to the project? Start with [Learned Verifier: Start Here](https://claude.ai/artifact/Y4krwNhPeXfwj64E5QZTZ5).** This doc reflects the state on 2026-11-21. Since then S1 (per-step lane scalars) replaced w6 as the best model at 0.0324 regret, and the dense-label and lane-segment runs finished without beating w6.
 
 Our best verifier is still w6\_timestep (regret 0.0352 ± 0.0013). The next goal is to reduce safety-ranking errors within a scene, mostly drivable area, which is about 0.016 of that regret. The plan: run cheap bounds and readout fixes first, then loss changes, and re-extract inputs only if the bounds say the gain is there.
+
+## Next: three directions from the S1 closed-loop diagnosis
+
+Plan as of 2026-11-27. In closed loop S1 trails PDM+SL by 2.92 CLS, mostly pedestrian collisions: its collision head rates colliding and collision-free candidates about equally safe, so the progress term decides the pick (Doc). The three directions below target that. Two of them need new labels, so one label regeneration run serves all three.
+
+**1. Per-step agent features.** At each of the 41 steps, place every agent with a constant-velocity forecast and take the nearest n to ego's box at that step. Add their features to that step's token, as `--step-lane scalars` adds 14 lane values per step, so self-attention across steps can use them.
+
+- Per agent, in ego's frame at that step: relative position, relative velocity, heading, box size, type (vehicle, pedestrian, cyclist) and the exact box-to-box gap.
+- Plus exact summary values per step: the smallest gap to any vehicle and to any pedestrian or cyclist, and a time-to-collision estimate. This is the agent version of S1's lane values, which lifted drivable pair accuracy from 0.57 to 0.66.
+- n: start at 8 per step, encoded with a small MLP and max-pooled. With 32 per step, each sample holds 16 × 41 × 32 agent entries. S2 showed that a heavier per-step encoder (36 lane segments) can cost more without beating plain values.
+- The label files hold only DP's 32 agents, with pedestrians capped at the nearest 10. Features from them test the idea now but still miss the pedestrian in `159942fd13675580`. The fix is a larger agent pool saved at label time, for example 64 agents with no pedestrian cap.
+
+**2. A stronger collision signal.** Collision and TTC are supervised with one bit per candidate, so the model has to work out which step caused it, and it learns scene-level risk instead.
+
+- Per-step labels: PDM's scorer finds which steps collide and reduces that to one bit. Saving the per-step flags at label time gives a per-step loss on S1's step logits, like the dense drivable labels of the `analytic-pretrain` pilots. Those pilots (A1, A2) test the same idea for drivable area: check their results first.
+- No new labels needed: the within-scene pairwise loss on collision (Loss-side fixes) pushes every collision-free candidate's score above every colliding one's in the same scene. That is the ranking that measured 0.25 in `e94b99e48b355de6`.
+
+**3. Progress relative to the human driver (`oracle_ep`).** S1 already predicts each candidate's raw progress in metres (`progress_raw`), so it only has to learn one number per scene: how far the human driver goes in 4 s. Progress is then computed exactly from that estimate, as in `oracle_ep`: min(1, max(ego, 2 m) / max(expert, 2 m)), plus the making-progress multiplier.
+
+- Keep the constant-velocity safety labels, which S1 can match at test time. Logged-future safety labels are worth about 0.24 CLS (`oracle_sl` vs `pdm_sl`).
+- The hybrid test (PDM+SL's safety metrics × progress against the median of DP's 16 candidates) bounds this direction with one closed-loop batch, before any training.
+
+**Order**
+
+| Phase | What | New labels | Decided by |
+| --- | --- | --- | --- |
+| A | Hybrid test (bounds direction 3) | no | closed loop, 3 seeds |
+| A | Direction 1 on DP's 32 agents, and the pairwise collision loss | no | collision pair accuracy, then closed loop |
+| B | One label regeneration: `expert-progress-labels` merged, plus per-step PDM collision and TTC flags, plus a 64-agent pool without the pedestrian cap | about 4 h planned | — |
+| C | Directions 1 (full agent pool), 2 (per-step labels) and 3 (predicted expert progress), each on S1, 3 seeds | — | closed loop |
+
+Each direction is judged by closed-loop CLS on Test14-hard-100 (non-reactive, 3 seeds) against S1's 75.60 and PDM+SL's 78.52, since offline regret has already misled once. Also track collision pair accuracy offline, and rerun the probe on the two pedestrian scenes. A 3-seed training run takes roughly half a day on aegis (S1 and S2 took about 14 h for 6 seed runs on 2026-11-23), so phase C is several days of shared GPU time.
+
+- [ ] Check the `analytic-pretrain` pilot results (A1, A2)
+- [ ] Phase A: hybrid selector (`pdm_sl` safety × progress against the candidates' median)
+- [ ] Phase A: per-step agent features from DP's 32 agents; pairwise collision loss
+- [ ] Phase B: label regeneration with expert progress, per-step collision and TTC flags, and a 64-agent pool
+- [ ] Phase C: directions 1 to 3 on S1, closed loop
+
+### Direction 3: what we learned (2026-11-27)
+
+A perfect estimate of the human driver's progress (E) is worth +1.31 CLS over PDM+SL, nearly all of `oracle_ep`'s gain. But the human's logged progress is a hard target to predict, and a conservative estimate may be enough.
+
+**True-E ceiling.** New selector `pdm_sl_ep` (branch `true-e-ceiling`, not pushed): PDM+SL's constant-velocity metrics with progress against the human's logged progress and the making-progress multiplier, i.e. `oracle_ep` without logged agent futures. Test14-hard-100, non-reactive, K = 16, noise 1.5.
+
+| Selector | Seed 0 | Seed 1 | Seed 2 | CLS (mean ± sd) |
+| --- | --- | --- | --- | --- |
+| `pdm_sl` | 78.96 | 77.96 | 78.64 | 78.52 ± 0.51 |
+| `pdm_sl_ep` (true E) | 79.64 | 80.35 | 79.52 | **79.83 ± 0.45** |
+| `oracle_ep` (true E and logged agent futures) | 80.07 | 80.52 | 79.83 | 80.14 ± 0.35 |
+
+- The progress definition is worth +1.31 (paired by seed: +0.68, +2.39, +0.88); logged agent futures add only 0.31 more.
+- The gain is safety, not distance: time-to-collision 78.7% to 81.3% of scenarios, collision-free 89.5% to 90.2%, comfort 93.3% to 93.7%, route progress unchanged at 93.3%. Capping progress at the human's removes the reward for faster plans.
+- Selection takes 56 ms per step, against 44 ms for `pdm_sl` and 227 ms for `oracle_ep`.
+
+**How the progress score is built** (`combined_score_expert`): progress = min(1, max(raw, 2 m) / max(E, 2 m)), 0 if ego goes back more than 2 m, with no safety gating; a making-progress multiplier sets the score to 0 when that ratio is below 0.2. PDM's current definition instead gates raw progress by the safety multipliers and divides by the best of the 16 candidates, which rewards the fastest safe-looking plan.
+
+**Raw progress can be computed, but swapping it into S1 does not help.**
+
+- Projecting the 40th planned pose and the current pose onto a centerline chained from DP's route lanes matches PDM's LQR-tracked raw progress closely: mean error 0.77 m, median 0.31 m, 90th percentile 1.26 m, correlation 0.984, within-scene rank correlation 0.965 (3,000 label samples, 48,000 candidates).
+- Swapping it into S1's current normalization, without retraining, raises validation regret from 0.0324 ± 0.0010 to 0.0352 ± 0.0013. PDM's exact raw progress gives 0.0321 ± 0.0022, so raw-progress accuracy is not what limits S1. About two-thirds of the increase is below 3 m/s, where dividing by a small best progress turns about 0.5 m of creep in near-stopped plans into a large error.
+- S1's learned raw progress is not a hidden safety signal: within mixed scenes it overstates colliding candidates' progress by an extra 0.33 m and TTC failures' by 0.42 m relative to safe ones, rather than understating them.
+- Correction: `train-labels-2k-ego` holds the human's logged speed and acceleration at each sample's time (`patch_ego_state.py` reads the database), not the PDM-driven ego's, so speed bands built from it are the human's speed.
+
+**Offline check of training-free E estimates** (3,000 label samples; true E from the human's logged poses, mean 19.4 m).
+
+| Estimate | Mean error | Mean error on starts and stops | Bias | Correlation |
+| --- | --- | --- | --- | --- |
+| `ca`: constant acceleration, human's logged speed and acceleration | 2.08 m | 2.98 m | +1.00 m | 0.989 |
+| `cv`: constant velocity, human's logged speed | 3.25 m | 7.65 m | +0.07 m | 0.959 |
+| `median` of the 16 candidates' progress | 5.35 m | 9.63 m | −1.45 m | 0.891 |
+| `first` candidate (noise 1.5 in the labels, not DP's own plan) | 5.44 m | 9.66 m | −1.49 m | 0.888 |
+| `cv_plan`: constant velocity, simulated ego's speed from the plans | 7.16 m | 12.62 m | −0.66 m | 0.816 |
+
+Starts and stops are the 942 samples where the human's progress differs from constant velocity by more than 4 m.
+
+- The same constant-velocity rule is off by 3.25 m from the human's speed but 7.16 m from the simulated ego's: most of the gap is the ego not driving like the human, not prediction error.
+- Single-step selection cannot measure the benefit. With PDM+SL's exact safety labels, its current definition already matches the true-E pick on 96.6% of samples (regret 0.0013), better than any estimate. The closed-loop gain must build up across steps.
+
+**Why a learned E predictor is hard.**
+
+- The ceiling's E is the human's progress from where the human was. Once the ego drifts from the log, that is not a function of the ego's state, so no predictor can match it exactly. The usable question is how far a human would drive from where the ego is now.
+- The hard cases are the ones that cost CLS: starts, stops and yield-or-go moments have two plausible outcomes. A mean lands between them, and a model that leans on current speed predicts going on exactly where a human stops.
+- Accuracy may not be needed. The gain needs E not to be too high; an E that is too low only creates ties that safety decides.
+
+**Free baselines in closed loop** (rule-based: PDM+SL's constant-velocity metrics × progress against an E estimate available at test time; no learned model). Test14-hard-100, non-reactive, K = 16, 3 seeds, run 2026-11-27.
+
+| Selector (E estimate) | Noise | Seed 0 | Seed 1 | Seed 2 | CLS (mean ± sd) | vs `pdm_sl` at the same noise, paired |
+| --- | --- | --- | --- | --- | --- | --- |
+| `pdm_sl` (no E) | 1.5 | 78.96 | 77.96 | 78.64 | 78.52 ± 0.51 | — |
+| `pdm_sl_ep_cv`: constant velocity | 1.5 | 79.47 | 79.54 | 78.51 | **79.17 ± 0.58** | **+0.65** |
+| `pdm_sl_ep_median`: median of the 16 candidates | 1.5 | 78.98 | 79.19 | 78.03 | 78.73 ± 0.62 | +0.21 |
+| `pdm_sl_ep_ca`: constant acceleration | 1.5 | 77.82 | 77.75 | 78.92 | 78.16 ± 0.66 | −0.36 |
+| `pdm_sl_ep`: true E (ceiling) | 1.5 | 79.64 | 80.35 | 79.52 | 79.83 ± 0.45 | +1.31 |
+| `pdm_sl` (no E) | 0.5 / 1.5 | 78.81 | 77.77 | 78.53 | 78.37 ± 0.54 | — |
+| `pdm_sl_ep_first`: DP's own plan | 0.5 / 1.5 | 77.63 | 78.26 | 77.62 | 77.84 ± 0.37 | −0.53 |
+
+- Constant velocity, the simplest estimate, recovers about half of the ceiling's gain (+0.65 of +1.31), within seed noise. Time-to-collision 79.3% of scenarios against 78.7% for `pdm_sl` and 81.3% for the ceiling.
+- The offline ranking did not predict closed loop: constant acceleration had the lowest offline error but is the worst here, and DP's own plan scores below `pdm_sl`. A likely cause, not checked, is that estimates which run high (constant acceleration's +1.0 m offline bias) bring back the reward for speed.
+- None of these involve S1. The next test combines S1's safety predictions with constant-velocity E (progress capped at the estimate, no safety gating), at inference, without retraining.
+
+**S1 with constant-velocity E at inference** (selector `verifier_ep_cv`, run 2026-11-28; S1's own safety predictions and learned raw progress, progress scored as min(1, max(raw, 2 m) / max(E, 2 m)) with no safety gating and the making-progress multiplier, E = ego speed × 4 s; no retraining). Same settings, 3 seeds.
+
+| Selector | Seed 0 | Seed 1 | Seed 2 | CLS (mean ± sd) | Collision-free | TTC | Route progress | Comfort |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 as is | 77.23 | 74.56 | 75.00 | 75.60 ± 1.43 | 87.0% | 77.7% | 93.1% | 87.7% |
+| S1 + constant-velocity E | 76.07 | 75.90 | 74.62 | 75.53 ± 0.79 | 87.5% | 76.7% | 87.5% | 93.7% |
+
+- No gain: comfort rises 6 points to PDM+SL's level, collisions are unchanged and route progress drops 5.6 points (the rule-based version with the same E lost 1 point). Without the speed pull, the pick falls to S1's collision predictions, which still cannot separate candidates.
+- Offline the same change cuts regret against a CLS-style target by 29% (0.0313 to 0.0223, 5,970 validation samples); offline single-step regret has now disagreed with closed loop twice.
+- Follow-up queued: S1 retrained on that target (S1-EP), with progress computed from the plan in training and closed loop. Design, evidence and run plan: Doc.
+
+**Next**
+
+- [x] Done (see the table above). Free baselines in closed loop: `pdm_sl_ep_median`, `_ca`, `_cv` at noise 1.5, and `_first` at noise 0.5 / 1.5 (candidate 0 = DP's own plan, a learned human-progress predictor conditioned on the ego's actual state), 3 seeds each.
+- [ ] If they fall short: conservative estimates, such as the lower of the candidate median and speed limit × 4 s, or a low quantile of the candidates' progress.
+- [ ] Only then a learned predictor: condition on the ego's state and the scene, predict a low quantile, and judge it in closed loop only.
 
 ## Priorities
 
@@ -174,6 +293,92 @@ Compare at seed 0 first: regret, top-1 and drivable within-scene pair accuracy, 
 3. Analytic pretraining and counterfactual pairs, if step 2 helps and the analytic labels agree well with PDM.
 4. Segment tokens or the raster, only if steps 2 and 3 plateau well below the ceiling.
 
+## Proposed: local lane attention
+
+Proposal (2026-11-21, not implemented): split each decoder layer's single cross-attention into a local lane stage and a global scene stage. Each step attends to a geometric encoding of the lanes next to it, then to agents, static objects, route and ego. This follows how PDM computes the labels: a step's drivable area, speed limit and oncoming flag depend on the lanes under ego's corners at that step, while collision and TTC depend on agents across the scene.
+
+### Design
+
+| Stage | Queries | Keys and values | Serves |
+| --- | --- | --- | --- |
+| 1. Self-attention | the 41 step tokens of one candidate | the same 41 steps | temporal context: speed, curvature, contiguous stretches |
+| 2. Local lane attention | each step | its k ≈ 8 nearest lanes, one key per (step, lane) built from relative geometry | drivable area, speed limit, driving direction; lane flags for collision and TTC |
+| 3. Global scene attention | each step | 32 agents, 5 static objects, route, ego (39 tokens, against w6's 109) | collision, TTC, progress |
+
+**Repeat the stages per layer.** Each of the 2 layers runs 1 → 2 → 3 → FFN, as w6's decoder layer does with its single cross-attention split in two. A single pass would leave steps unable to share what stage 2 found. Driving direction needs that: PDM scores the longest contiguous off-route stretch (under 2 m, 2–6 m, or more). Comfort pooling and progress also read the final step tokens.
+
+**Stage 2 keys, per (step, lane).** Project the step onto the lane and compute, at that point:
+
+- for each of ego's 4 corners: signed distance to the left boundary, the right boundary and the lane's ends;
+- heading difference to the lane, and lane width there;
+- lane-connector flag, on-route flag and speed limit.
+
+An MLP maps this vector to the key and value. The geometry comes from the raw lane inputs (20 points × 12 features per lane, already in the model inputs), not from DP's mean-pooled lane tokens. Project onto the left and right boundary polylines directly: the three polylines are resampled to 20 points separately, so point-indexed offsets are skewed on curves. The on-route flag is not in the inputs, but can be recovered by matching each lane against the 25 `route_lanes`. Also add the min signed corner distance over lanes as a plain step feature, so the model starts from the near-answer and attention learns the corrections (LQR drift, tolerance, seams between lanes).
+
+**Cost per scene.**
+
+| Part | Size |
+| --- | --- |
+| Projection (2,624 corners × 70 lanes × 20 points) | about 3.7 M distances; the brute-force polygon check (7.3 M) costs at most 1.6 ms unoptimized |
+| Stage 2 attention | 656 step queries × 8 keys |
+| Stage 3 attention | 656 × 39, against w6's 656 × 109 |
+
+Latency should land near w6's 3.4 ms, possibly slightly above. Not yet benchmarked.
+
+**Limits it does not fix.** Coverage stays DP's 70 lanes, chosen around ego's current pose. Car parks are missing. Inputs are raw poses, not LQR-tracked states. The analytic check over the same lanes agrees with PDM on 98.8% of candidates, so the realistic target is most of the 0.0145 drivable headroom, not all of it.
+
+**Open question: does stage 3 need DP's lane tokens?** The no-lane-token test running on aegis (branch `no-lane-tokens`, started 2026-11-21) answers it. If collision and TTC hold up without the lane tokens, stage 3 drops them. If not, keep them in stage 3 as global context.
+
+**Test plan** (one change per step, 3 seeds each; judged on drivable-only regret and drivable within-scene pair accuracy on mixed samples, with the other six metrics' pair accuracy and Brier as a guard):
+
+1. Min signed corner distance as a step feature on w6, no new attention: how much exact geometry alone gives.
+2. Add stage 2 to w6's layer, lanes kept in stage 3: local lane attention.
+3. Drop the lanes from stage 3 (the full design), if the no-lane-token test says that is safe.
+
+&#91;embedded content: proposed decoder layer · 3 attention stages\]
+
+Only stage 2 is new. Its keys come from the raw lane inputs, computed per step, so each step sees the lane boundaries next to its own corners rather than a mean-pooled summary of each lane.
+
+### Lane encoding options for stage 2
+
+Recommended order: analytic signed distances (E) as the floor, then step-frame boundary snippets (B) with E's distances in each key, with the raster patch (D) as the comparison if B's errors cluster at lane seams. Four choices separate the options:
+
+- **Frame.** Geometry in ego's frame at t = 0 (as now), or in the step's own frame (centred on ego at step t, rotated to its heading). In the step frame, "right-front corner 0.2 m past the right edge" looks the same everywhere, so it is learned once.
+- **Granularity of a key:** a whole lane, a local piece of a lane, single boundary points, or raster cells.
+- **Union.** A corner is legal inside any lane. Either attention learns the min across per-lane keys, or the union is computed up front (signed-distance field or raster), which resolves overlaps and seams between adjacent lanes.
+- **Precision against cost.** The label flips at 0 m with no tolerance, so an encoding accurate only to about 0.25 m blurs the cases that matter.
+
+| Option | Key per step | Union | Precision | Cost and risk |
+| --- | --- | --- | --- | --- |
+| A. Relative geometry per (step, lane) | projection onto the lane, then hand-picked features: corner distances to both boundaries and the ends, heading difference, width, flags | learned | exact, up to the 20-point resampling | cheap; the model never sees what the features leave out (curvature ahead) |
+| B. Boundary snippet per (step, lane), step frame | the nearest left- and right-boundary points around the projection (about ±3 points), in the step frame, through a small PointNet or MLP | learned | exact | cheap; the model sees local shape (curvature, narrowing) as well as distance, so B generalizes A |
+| C. Nearest boundary points as tokens | per corner, the k nearest points on any lane boundary (densified), with (dx, dy) in the step frame, left/right tag and lane index | learned, over points | exact | no projection or per-lane bookkeeping; needs a kNN over about 2,800 points per corner; shared edges of adjacent lanes appear twice |
+| D. Raster patch | signed-distance grid of the union of the 70 lane polygons, built once per scene; a small footprint-aligned patch read per step with `grid_sample` | computed | cell size (0.2 m cells give about ±0.1 m) | union and seams for free; raster once per scene; the error sits at the decision threshold |
+| E. Analytic signed distances | per corner: min signed distance over the union, direction to the nearest edge, nearest lane | computed | exact | about 12 numbers per step, no attention; test plan step 1 |
+| F. Implicit SDF-style decoder | a trainable per-lane latent; an MLP of (latent, corner position in that lane's frame) gives an inside/outside logit | learned | exact if learned well | learns the geometry end to end; research-heavy and harder to debug |
+| G. Lane topology | successor, predecessor and left/right neighbour links | helps seams | — | not in DP's inputs, needs re-extraction; mostly helps driving direction; lowest priority |
+
+A, B, C, E and F keep exact geometry; D trades precision for a free union. Projecting onto the boundary polylines (A, B, C) avoids the point-indexed skew on curves. A and B also carry lane identity (heading, speed limit, on-route), so they help speed limit and driving direction too; D and E only answer how far inside the road a corner is. Every option inherits DP's 70-lane selection and the missing car parks. Try C or F only if B plateaus well short of the 0.0145 headroom.
+
+### Lane properties to encode
+
+A stage 2 key should carry the lane properties PDM's labels read, each measured against ego's corners at that step, not as a per-lane summary. L1 (lane segment tokens with absolute positions, 0.0375 against w6's 0.0352) suggests the step-relative geometry is what matters, not finer tokens.
+
+| Lane property | Metrics | What PDM checks | In DP's inputs? |
+| --- | --- | --- | --- |
+| Signed distance from each corner to the left and right boundaries and lane ends | drivable area | any corner outside every lane, connector and car-park polygon at any step, zero tolerance | yes, in the raw 20 points; project onto the boundary polylines to avoid the skew on curves |
+| Union and overlap with neighbouring lanes | drivable area | a corner is legal inside any lane, so seams between lanes matter | implicit; learned as a min over keys or computed up front |
+| Number of lanes the footprint covers | collision, possibly TTC | being in multiple lanes changes at-fault for lateral collisions (to verify) | derivable from the same corner-in-polygon tests |
+| On-route flag | driving direction, progress | longest stretch driven off route lanes (under 2 m, 2–6 m, more); progress is measured along the route | no; recover by matching the 70 lanes against the 25 route\_lanes |
+| Heading difference, step to lane | driving direction | separates against-traffic from off-route; picks the lane at overlaps | yes, from the centerline direction |
+| Speed limit | speed limit | ego speed against the limit of the lane it is in | yes |
+| Lane or lane-connector flag | drivable area, collision | connectors are drivable; intersections hold most seams and overlaps | partly; check how DP marks connectors |
+| Traffic-light state | collision | red-light connectors appear to be added as obstacles, so entering one counts as a collision (to verify) | yes, one-hot per lane |
+| Lane width at the projection | drivable area | not checked; sets a corner's margin | derivable from the boundaries |
+| Curvature just ahead | drivable area, comfort | not checked; predicts whether the next steps cut the edge | derivable from a boundary snippet (option B) |
+
+Priority: signed corner distance first (test plan step 1), then on-route flag and heading difference, then speed limit, connector flag and light state in the key, then footprint lane count. The two rows marked "to verify" come from a reading of PDM's scorer and observation code; confirm them in pdm\_scorer before relying on them. Encoding cannot recover car parks or lanes outside DP's 70.
+
 ## Readout fixes
 
 Comparing w6's readouts with PDM's label code (see Doc) turned up three mismatches. Each is a small code change, so they can be tested together in one 3-seed run (#2) and separated afterwards if it helps.
@@ -209,6 +414,38 @@ Open-loop regret is a proxy. The project's claim depends on CLS in simulation, a
 - [ ] Record the time per planning step for the verifier and for PDM scoring of 16 candidates.
 - [ ] Repeat for whichever checkpoint wins experiments #2 to #6.
 - [ ] Check whether drivable-area regret costs CLS. PDM's rule (lanes, lane connectors and car parks, zero tolerance) is stricter than CLS's (the whole drivable layer, 0.3 m tolerance), so some of our drivable-area regret may not matter in closed loop.
+
+## Training target: expert-relative progress (oracle\_ep)
+
+The headroom above PDM+SL comes from how progress is scored, not from knowing where other agents go. An oracle that scores progress against the human driver reaches 80.14 CLS, against PDM+SL's 78.52. The verifier imitates PDM+SL's labels, so it cannot reach this. Retraining on the expert-relative target is the direction where a learned verifier can beat the rule-based scorer.
+
+**How oracle\_ep scores the 16 candidates at each step** (`OracleExpertProgressSelector` and `combined_score_expert`, branch `expert-progress-labels`, commits 18ae976 and 1d175b9, not merged):
+
+1. Track each candidate with PDM's LQR simulator over 4 s (40 poses), as `pdm_sl` does.
+2. Place the other agents at their logged futures instead of constant-velocity forecasts. This only works with non-reactive agents.
+3. Compute the 7 metrics with CLS weights (progress 5, TTC 5, speed limit 4, comfort 2), as `pdm_sl` does.
+4. Replace PDM's progress, which is each candidate's progress divided by the best of the 16, with progress relative to the human driver's logged progress over the same horizon and centerline: min(1, max(ego, 2 m) / max(expert, 2 m)), and 0 if ego goes back more than 2 m. Matching the human scores 1, and driving faster earns nothing. Near the end of a log, the human's progress is scaled up to the full horizon.
+5. Add `ego_is_making_progress` as a gate: a progress ratio below 0.2 sets the score to 0, as in CLS.
+6. Score = product of the gates × weighted mean of the rest; execute the highest-scoring candidate.
+
+| Selector | Other agents | Progress | CLS (mean ± sd, 3 seeds) |
+| --- | --- | --- | --- |
+| `pdm_sl` | constant-velocity forecasts | vs best candidate | 78.52 ± 0.51 |
+| `oracle_sl` | logged futures | vs best candidate | 78.76 ± 0.57 |
+| `oracle_ep` | logged futures | vs human driver | **80.14 ± 0.35** |
+
+Test14-hard-100, non-reactive, K = 16, noise 1.5. Write-up: `results/expert_progress_oracle.md` on the branch.
+
+- Logged futures add 0.24 CLS. The progress definition adds 1.37, positive on every seed (+0.98, +2.41, +0.73), and changes the pick on 41% of steps.
+- The gain is not more progress: route progress stays at about 94% for both. It comes from TTC (78–79% to 81–82% of scenarios) and comfort (91–92% to 93–94%). Capping progress at the human's removes the reward for faster, riskier candidates.
+- The human's progress is unknown at test time, so `oracle_ep` cannot be deployed. A learned verifier can learn to estimate it from the scene; a rule-based scorer cannot.
+- Current verifiers are trained on `pdm_sl`-style labels. In closed loop (2026-11-25) S1 and w6 gained only +0.47 and +0.39 CLS over the first candidate, against +3.39 for `pdm_sl`.
+
+**To do**
+
+- [ ] Merge `expert-progress-labels` into main (2 commits from Nov 11). Its label recorder also saves `progress_expert`.
+- [ ] Regenerate `train-labels-2k` with that recorder. The headroom report planned the full label run at about 4 h. Its simulation logs take about 80 GB; aegis has room after the 2026-11-26 cleanup.
+- [ ] Retrain S1 on `combined_score_expert`, 3 seeds, then run closed loop on Test14-hard-100. Keep if CLS beats the current S1 (75.60 ± 1.43); the goal is PDM+SL's 78.52 or above.
 
 ## Open questions
 
