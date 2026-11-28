@@ -103,10 +103,12 @@ All remote work runs on aegis (`ssh aegis`, account shared with Shubham). Ask be
 | Diagnostic scripts and outputs | `~/IDL_project/dps-closed-loop/runs/diag/` (copied to `scripts/diag/`, `results/diag/`) |
 | Cleanup record (2026-11-26, about 140 GB freed) | `~/cleanup_2026-11-26.txt` |
 
-Worktrees on aegis: `dps-true-e` (branch `true-e-ceiling`, at `f8251c2`, behind `main` by doc commits only),
-`dps-closed-loop` (`closed-loop`), `dps-step-lane-features`, `dps-timestep-verifier`, `dps-analytic-pretrain`,
-`dps-drivable-check`, `dps-no-lanes`, `dps-timestep-classifier`, `dps-verifier-ablations`; `diffusion-planner-scorer`
-is an old `main` checkout (the conda env's editable install points there, so set `PYTHONPATH` to the worktree).
+Checkouts on aegis: `diffusion-planner-scorer` is the `main` branch (the conda env's editable install points there, so
+`import diffusion_planner` gets `main`'s code; update with `git pull --ff-only`). `dps-true-e` is a detached checkout of
+`origin/main` (update with `git fetch origin && git switch --detach origin/main`); its `runs/` holds the S1-EP runs.
+Worktrees on older branches, where code differs from `main` (run them with `PYTHONPATH=$PWD`): `dps-closed-loop`
+(`closed-loop`), `dps-step-lane-features`, `dps-timestep-verifier`, `dps-analytic-pretrain`, `dps-drivable-check`,
+`dps-no-lanes`, `dps-timestep-classifier`, `dps-verifier-ablations`.
 
 ## Code map
 
