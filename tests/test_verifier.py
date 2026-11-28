@@ -130,6 +130,9 @@ class _FakeScorer:
     def speed_limit_compliance(self):
         return np.ones(len(self.progress))
 
+    def expert_progress(self, scenario, iteration):
+        return 7.0
+
 
 def test_label_recorder_records_every_nth_step(tmp_path):
     from diffusion_planner.scorer.selectors import PDMSelector
